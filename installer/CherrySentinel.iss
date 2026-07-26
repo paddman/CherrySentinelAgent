@@ -35,18 +35,34 @@ SetupMutex=CherrySentinelSetupMutex
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+; Installer side art (from imggui 5b8ee925 vertical + face crop)
+WizardImageFile={#SourceRoot}\assets\installer\WizardImage.png
+WizardSmallImageFile={#SourceRoot}\assets\installer\WizardSmallImage.png
+WizardImageStretch=yes
+WizardImageAlphaFormat=defined
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=6.1sp1
 DisableWelcomePage=no
-InfoBeforeFile=
 SetupLogging=yes
 CloseApplications=force
 RestartApplications=no
+AppCopyright=Copyright (C) CherryDeskX
+VersionInfoCompany=CherryDeskX
+VersionInfoProductName=Cherry Sentinel Agent
+VersionInfoDescription=Cherry Sentinel Agent Setup
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Messages]
+WelcomeLabel1=Welcome to Cherry Sentinel Agent Setup
+WelcomeLabel2=This will install Cherry Sentinel Agent (Windows Service) and Dashboard on your computer.%n%nSecure endpoint monitoring — detect password spray, lateral movement, and abnormal process activity.%n%nIt is recommended that you close all other applications before continuing.
+FinishedHeadingLabel=Completing Cherry Sentinel Agent Setup
+FinishedLabelNoIcons=Setup has finished installing Cherry Sentinel Agent on your computer.
+FinishedLabel=Setup has finished installing Cherry Sentinel Agent on your computer. The application may be launched by selecting the installed shortcuts.
+ClickFinish=Click Finish to exit Setup.
 
 [Types]
 Name: "full"; Description: "Full installation (Agent + Dashboard)"
