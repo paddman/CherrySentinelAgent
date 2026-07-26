@@ -1,0 +1,96 @@
+{
+  "rules": [
+    {
+      "id": "INTERNAL_PASSWORD_SPRAY",
+      "name": "Internal Password Spray",
+      "enabled": true,
+      "severity": "High",
+      "eventIds": [4625],
+      "windowMinutes": 5,
+      "minEventCount": 20,
+      "minDistinctUsernames": 5,
+      "cooldownMinutes": 15,
+      "description": "Single source failed logons against many usernames on one destination within 5 minutes."
+    },
+    {
+      "id": "DISTRIBUTED_PASSWORD_SPRAY",
+      "name": "Distributed Password Spray",
+      "enabled": true,
+      "severity": "Critical",
+      "eventIds": [4625],
+      "windowMinutes": 10,
+      "minEventCount": 50,
+      "minDistinctSources": 3,
+      "cooldownMinutes": 15,
+      "description": "Multiple sources generating high volume of failed logons against one destination."
+    },
+    {
+      "id": "BRUTE_FORCE_SINGLE_ACCOUNT",
+      "name": "Brute Force Single Account",
+      "enabled": true,
+      "severity": "High",
+      "eventIds": [4625],
+      "windowMinutes": 5,
+      "minEventCount": 20,
+      "maxDistinctUsernames": 1,
+      "cooldownMinutes": 10,
+      "description": "Single source repeatedly failing one username on one destination."
+    },
+    {
+      "id": "SPRAY_THEN_SUCCESS",
+      "name": "Spray Then Success",
+      "enabled": true,
+      "severity": "Critical",
+      "type": "sequence",
+      "windowMinutes": 15,
+      "failureEventId": 4625,
+      "successEventId": 4624,
+      "minFailures": 5,
+      "matchFields": ["SourceIp", "Username"],
+      "cooldownMinutes": 30,
+      "description": "Multiple failures followed by a successful logon for the same source/username."
+    },
+    {
+      "id": "PRIVILEGED_LOGON_AFTER_FAILURES",
+      "name": "Privileged Logon After Failures",
+      "enabled": true,
+      "severity": "Critical",
+      "type": "sequence",
+      "windowMinutes": 15,
+      "failureEventId": 4625,
+      "successEventId": 4624,
+      "privilegeEventId": 4672,
+      "minFailures": 3,
+      "matchFields": ["SourceIp"],
+      "cooldownMinutes": 30,
+      "description": "Failed logons from a source followed by successful logon and special privileges (4672)."
+    },
+    {
+      "id": "SUSPICIOUS_ACCOUNT_NAMES",
+      "name": "Suspicious Account Names",
+      "enabled": true,
+      "severity": "Medium",
+      "eventIds": [4625, 4624],
+      "windowMinutes": 10,
+      "minEventCount": 5,
+      "suspiciousUsernames": [
+        "123", "admin", "admin1", "administrator", "guest", "root",
+        "www", "wwwroot", "db", "web", "data", "test", "oracle", "postgres"
+      ],
+      "cooldownMinutes": 20,
+      "description": "Suspicious account names with sufficient volume (name alone does not alert)."
+    },
+    {
+      "id": "MULTIPLE_INTERNAL_TARGETS",
+      "name": "Multiple Internal Targets",
+      "enabled": true,
+      "severity": "High",
+      "type": "network",
+      "windowMinutes": 10,
+      "minDistinctDestinations": 5,
+      "authPorts": [22, 23, 80, 135, 139, 443, 445, 1433, 3306, 3389, 5985, 5986],
+      "cooldownMinutes": 15,
+      "description": "One source connecting to many destinations on authentication-related ports."
+    }
+  ]
+}
