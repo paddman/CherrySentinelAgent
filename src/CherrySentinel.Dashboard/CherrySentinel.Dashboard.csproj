@@ -25,6 +25,9 @@
     <Resource Include="Assets\cherry_full.png" />
     <Resource Include="Assets\cherry_avatar_256.png" />
     <Resource Include="Assets\cherry_dashboard_pose.png" Condition="Exists('Assets\cherry_dashboard_pose.png')" />
+    <Resource Include="Assets\app-icon-master.png" />
+    <Resource Include="Assets\app-32.png" />
+    <Resource Include="Assets\app-256.png" />
     <Content Include="Assets\CherrySentinel.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
