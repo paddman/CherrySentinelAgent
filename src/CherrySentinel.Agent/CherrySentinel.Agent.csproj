@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>CherrySentinel.Agent</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <Description>Cherry Sentinel Endpoint Security Monitoring Agent (Windows Service)</Description>
+    <AssemblyName>CherrySentinel.Agent</AssemblyName>
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="9.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CherrySentinel.Collectors.Windows\CherrySentinel.Collectors.Windows.csproj" />
+    <ProjectReference Include="..\CherrySentinel.Core\CherrySentinel.Core.csproj" />
+    <ProjectReference Include="..\CherrySentinel.Detection\CherrySentinel.Detection.csproj" />
+    <ProjectReference Include="..\CherrySentinel.Response\CherrySentinel.Response.csproj" />
+    <ProjectReference Include="..\CherrySentinel.Shared\CherrySentinel.Shared.csproj" />
+    <ProjectReference Include="..\CherrySentinel.Storage\CherrySentinel.Storage.csproj" />
+    <ProjectReference Include="..\CherrySentinel.Transport\CherrySentinel.Transport.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="appsettings.Production.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="default-rules.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\config\rules.json" Link="config\rules.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\config\allowlist.json" Link="config\allowlist.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

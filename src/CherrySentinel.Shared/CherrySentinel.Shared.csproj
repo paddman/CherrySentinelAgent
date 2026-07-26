@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CherrySentinel.Shared</RootNamespace>
+    <Description>Shared models and contracts for Cherry Sentinel</Description>
+  </PropertyGroup>
+</Project>
