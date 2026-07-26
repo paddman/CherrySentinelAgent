@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CherrySentinel.Server</RootNamespace>
+    <Description>Cherry Sentinel Central API and correlation server</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Certificate" Version="10.0.0" />
+    <PackageReference Include="Npgsql" Version="9.0.3" />
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CherrySentinel.Shared\CherrySentinel.Shared.csproj" />
+  </ItemGroup>
+</Project>
