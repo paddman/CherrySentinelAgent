@@ -1,0 +1,175 @@
+<Window x:Class="CherrySentinel.Dashboard.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Cherry Sentinel — Operations Dashboard"
+        Height="820" Width="1280"
+        MinHeight="640" MinWidth="1024"
+        WindowStartupLocation="CenterScreen">
+  <DockPanel>
+    <!-- Top bar -->
+    <Border DockPanel.Dock="Top" Background="#0F172A" BorderBrush="#24314A" BorderThickness="0,0,0,1" Padding="16,12">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <Border Width="10" Height="10" CornerRadius="5" Background="#EF4444" Margin="0,0,10,0" VerticalAlignment="Center"/>
+          <StackPanel>
+            <TextBlock Text="Cherry Sentinel" FontSize="18" FontWeight="Bold"/>
+            <TextBlock x:Name="SubtitleText" Text="Endpoint security monitoring · detect &amp; track" Foreground="#93A4C3" FontSize="11"/>
+          </StackPanel>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock Text="Server" VerticalAlignment="Center" Foreground="#93A4C3" Margin="0,0,8,0"/>
+          <TextBox x:Name="ServerUrlBox" Width="280" Text="https://localhost:7443" VerticalAlignment="Center"/>
+          <Button x:Name="RefreshBtn" Content="Refresh" Margin="8,0,0,0" Click="RefreshBtn_Click" Style="{StaticResource PrimaryButton}"/>
+          <Button x:Name="DemoBtn" Content="Load Demo" Margin="8,0,0,0" Click="DemoBtn_Click"/>
+          <Border x:Name="StatusBadge" Margin="12,0,0,0" CornerRadius="12" Padding="10,5" Background="#14532D" VerticalAlignment="Center">
+            <TextBlock x:Name="StatusText" Text="Offline" FontSize="11" FontWeight="SemiBold"/>
+          </Border>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- KPI row -->
+    <UniformGrid DockPanel.Dock="Top" Rows="1" Columns="5" Margin="16,14,6,0">
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="OPEN INCIDENTS" Foreground="#93A4C3" FontSize="11" FontWeight="SemiBold"/>
+          <TextBlock x:Name="KpiIncidents" Text="0" FontSize="28" FontWeight="Bold" Margin="0,6,0,0"/>
+        </StackPanel>
+      </Border>
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="THREAT CAMPAIGNS" Foreground="#93A4C3" FontSize="11" FontWeight="SemiBold"/>
+          <TextBlock x:Name="KpiCampaigns" Text="0" FontSize="28" FontWeight="Bold" Margin="0,6,0,0" Foreground="#F59E0B"/>
+        </StackPanel>
+      </Border>
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="MULTI-HOP PATHS" Foreground="#93A4C3" FontSize="11" FontWeight="SemiBold"/>
+          <TextBlock x:Name="KpiMultiHop" Text="0" FontSize="28" FontWeight="Bold" Margin="0,6,0,0" Foreground="#F43F5E"/>
+        </StackPanel>
+      </Border>
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="AGENTS" Foreground="#93A4C3" FontSize="11" FontWeight="SemiBold"/>
+          <TextBlock x:Name="KpiAgents" Text="0" FontSize="28" FontWeight="Bold" Margin="0,6,0,0" Foreground="#22C55E"/>
+        </StackPanel>
+      </Border>
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="MODE" Foreground="#93A4C3" FontSize="11" FontWeight="SemiBold"/>
+          <TextBlock x:Name="KpiMode" Text="—" FontSize="18" FontWeight="Bold" Margin="0,10,0,0"/>
+          <TextBlock x:Name="LastRefreshText" Text="" Foreground="#93A4C3" FontSize="11" Margin="0,4,0,0"/>
+        </StackPanel>
+      </Border>
+    </UniformGrid>
+
+    <!-- Body -->
+    <Grid Margin="16,0,16,16">
+      <TabControl x:Name="MainTabs">
+        <!-- Incidents -->
+        <TabItem Header="Incidents">
+          <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="1.4*"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <DataGrid x:Name="IncidentsGrid" SelectionChanged="IncidentsGrid_SelectionChanged">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="90"/>
+                <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="2*"/>
+                <DataGridTextColumn Header="Source" Binding="{Binding SourceIp}" Width="120"/>
+                <DataGridTextColumn Header="Destination" Binding="{Binding DestinationIp}" Width="120"/>
+                <DataGridTextColumn Header="Port" Binding="{Binding DestinationPort}" Width="60"/>
+                <DataGridTextColumn Header="Process" Binding="{Binding ProcessName}" Width="110"/>
+                <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="60"/>
+                <DataGridTextColumn Header="Failed" Binding="{Binding FailedAttempts}" Width="70"/>
+                <DataGridTextColumn Header="Last Seen" Binding="{Binding LastSeen, StringFormat=g}" Width="140"/>
+              </DataGrid.Columns>
+            </DataGrid>
+            <Border Grid.Column="1" Style="{StaticResource Card}" Margin="10,0,0,0">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Incident detail" FontWeight="Bold" FontSize="15" Margin="0,0,0,10"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                  <TextBlock x:Name="IncidentDetailText" Text="Select an incident"
+                             FontFamily="Consolas" FontSize="12" TextWrapping="Wrap"
+                             Foreground="#C7D2E5" LineHeight="18"/>
+                </ScrollViewer>
+              </DockPanel>
+            </Border>
+          </Grid>
+        </TabItem>
+
+        <!-- Lateral / Threats -->
+        <TabItem Header="Lateral Paths">
+          <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="1.2*"/>
+            </Grid.ColumnDefinitions>
+            <DockPanel>
+              <TextBlock DockPanel.Dock="Top" Text="Threat campaigns (cross-host)" FontWeight="SemiBold" Margin="0,0,0,8"/>
+              <ListBox x:Name="CampaignsList" SelectionChanged="CampaignsList_SelectionChanged">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <StackPanel>
+                      <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                      <TextBlock Foreground="#93A4C3" FontSize="11">
+                        <Run Text="Severity: "/><Run Text="{Binding Severity}"/>
+                        <Run Text="  ·  Hops: "/><Run Text="{Binding HopCount}"/>
+                      </TextBlock>
+                      <TextBlock Text="{Binding PathSummary}" Foreground="#60A5FA" FontSize="11" Margin="0,2,0,0"/>
+                    </StackPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </DockPanel>
+            <Border Grid.Column="1" Style="{StaticResource Card}" Margin="10,0,0,0">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Attack path (tracked, not executed)" FontWeight="Bold" FontSize="15" Margin="0,0,0,10"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                  <StackPanel>
+                    <TextBlock x:Name="PathVisualText" FontFamily="Consolas" FontSize="13"
+                               Foreground="#FBBF24" TextWrapping="Wrap" Margin="0,0,0,14"/>
+                    <TextBlock x:Name="CampaignDetailText" FontFamily="Consolas" FontSize="12"
+                               Foreground="#C7D2E5" TextWrapping="Wrap" LineHeight="18"/>
+                  </StackPanel>
+                </ScrollViewer>
+              </DockPanel>
+            </Border>
+          </Grid>
+        </TabItem>
+
+        <!-- Agents -->
+        <TabItem Header="Agents">
+          <DataGrid x:Name="AgentsGrid" Margin="0,12,0,0">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Agent ID" Binding="{Binding AgentId}" Width="140"/>
+              <DataGridTextColumn Header="Host" Binding="{Binding ComputerName}" Width="140"/>
+              <DataGridTextColumn Header="IP" Binding="{Binding HostIp}" Width="120"/>
+              <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="90"/>
+              <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100"/>
+              <DataGridTextColumn Header="Last Seen (UTC)" Binding="{Binding LastSeenUtc, StringFormat=g}" Width="*"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </TabItem>
+
+        <!-- Catalog -->
+        <TabItem Header="Threat Catalog">
+          <DataGrid x:Name="CatalogGrid" Margin="0,12,0,0">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="140"/>
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="200"/>
+              <DataGridTextColumn Header="Rule ID" Binding="{Binding DetectionRuleId}" Width="220"/>
+              <DataGridTextColumn Header="MITRE" Binding="{Binding MitreTechnique}" Width="100"/>
+              <DataGridTextColumn Header="Cross-host tracking" Binding="{Binding CrossHostTracking}" Width="*"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </TabItem>
+      </TabControl>
+    </Grid>
+  </DockPanel>
+</Window>

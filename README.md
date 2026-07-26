@@ -55,6 +55,15 @@ CherrySentinel.sln
 src/   tests/   installer/   docs/   config/   rules/
 ```
 
+## Desktop Dashboard (native WPF app — not web)
+
+```powershell
+dotnet run --project src/CherrySentinel.Dashboard/CherrySentinel.Dashboard.csproj -c Release
+```
+
+Shows incidents, multi-hop lateral paths, agents, and threat catalog inside a Windows app.  
+Uses Central API when available; **Load Demo** works offline.
+
 ## Build / test
 
 ```powershell
@@ -63,6 +72,7 @@ dotnet restore
 dotnet build CherrySentinel.sln -c Release
 dotnet test CherrySentinel.sln -c Release
 ```
+
 
 ## Publish agent
 

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon />
+    <AssemblyName>CherrySentinel.Dashboard</AssemblyName>
+    <RootNamespace>CherrySentinel.Dashboard</RootNamespace>
+    <Product>Cherry Sentinel Dashboard</Product>
+    <Description>Native Windows dashboard for Cherry Sentinel incidents and lateral threat paths</Description>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CherrySentinel.Shared\CherrySentinel.Shared.csproj" />
+  </ItemGroup>
+</Project>
