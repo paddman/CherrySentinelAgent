@@ -28,8 +28,10 @@ DisableProgramGroupPage=no
 LicenseFile=
 OutputDir={#SourceRoot}\artifacts\setup
 OutputBaseFilename=CherrySentinel-Setup-{#MyAppVersion}
+; Classic BMP ICO required (PNG-in-ICO often ignored by Inno)
 SetupIconFile={#SourceRoot}\assets\icons\CherrySentinel.ico
 UninstallDisplayIcon={app}\CherrySentinel.ico
+SetupMutex=CherrySentinelSetupMutex
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
