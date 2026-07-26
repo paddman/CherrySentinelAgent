@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
@@ -17,15 +16,81 @@ public partial class MainWindow : Window
     private bool _usingDemo;
     private List<Incident> _incidents = [];
     private List<ThreatCampaign> _campaigns = [];
+    private readonly Dictionary<string, FrameworkElement> _pages;
+    private readonly Dictionary<string, Button> _navButtons;
 
     public MainWindow()
     {
         InitializeComponent();
         _api = new CentralApiClient(ServerUrlBox.Text.Trim());
+        SettingsUrlBox.Text = ServerUrlBox.Text;
+
+        _pages = new Dictionary<string, FrameworkElement>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Dashboard"] = PageDashboard,
+            ["Incidents"] = PageIncidents,
+            ["Paths"] = PagePaths,
+            ["Agents"] = PageAgents,
+            ["Catalog"] = PageCatalog,
+            ["Settings"] = PageSettings
+        };
+        _navButtons = new Dictionary<string, Button>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Dashboard"] = NavDashboard,
+            ["Incidents"] = NavIncidents,
+            ["Paths"] = NavPaths,
+            ["Agents"] = NavAgents,
+            ["Catalog"] = NavCatalog,
+            ["Settings"] = NavSettings
+        };
+
         _autoRefresh = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _autoRefresh.Tick += async (_, _) => await RefreshAsync(silent: true);
         _autoRefresh.Start();
         Loaded += async (_, _) => await RefreshAsync();
+        ShowPage("Dashboard");
+    }
+
+    private void Nav_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string tag)
+        {
+            ShowPage(tag);
+        }
+    }
+
+    private void ShowPage(string name)
+    {
+        foreach (var kv in _pages)
+        {
+            kv.Value.Visibility = kv.Key.Equals(name, StringComparison.OrdinalIgnoreCase)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        foreach (var kv in _navButtons)
+        {
+            kv.Value.Style = (Style)FindResource(
+                kv.Key.Equals(name, StringComparison.OrdinalIgnoreCase) ? "NavBtnActive" : "NavBtn");
+        }
+
+        PageTitle.Text = name switch
+        {
+            "Paths" => "Lateral Paths",
+            "Agents" => "Endpoints",
+            "Catalog" => "Detections / Rules",
+            _ => name
+        };
+        PageSubtitle.Text = name switch
+        {
+            "Dashboard" => "Security overview · detect & track",
+            "Incidents" => "Correlated security incidents",
+            "Paths" => "Cross-host threat campaigns",
+            "Agents" => "Registered endpoints",
+            "Catalog" => "Detection rule coverage",
+            "Settings" => "Server connection & mode",
+            _ => ""
+        };
     }
 
     private async void RefreshBtn_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
@@ -36,12 +101,19 @@ public partial class MainWindow : Window
         SetStatus(online: false, demo: true);
     }
 
+    private async void ApplySettings_Click(object sender, RoutedEventArgs e)
+    {
+        ServerUrlBox.Text = SettingsUrlBox.Text.Trim();
+        await RefreshAsync();
+    }
+
     private async Task RefreshAsync(bool silent = false)
     {
         try
         {
             RefreshBtn.IsEnabled = false;
             var url = ServerUrlBox.Text.Trim();
+            SettingsUrlBox.Text = url;
             if (!string.Equals(_api.BaseUrl, url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
             {
                 _api.Dispose();
@@ -51,18 +123,13 @@ public partial class MainWindow : Window
             var healthy = await _api.HealthAsync();
             if (!healthy)
             {
-                if (!_usingDemo && !silent)
+                if (!_usingDemo)
                 {
-                    // First connect fail → show demo so UI is useful
                     ApplyDemo();
                 }
 
                 SetStatus(online: false, demo: _usingDemo);
-                if (!silent)
-                {
-                    KpiMode.Text = _usingDemo ? "Demo data" : "Server offline";
-                }
-
+                KpiMode.Text = _usingDemo ? "Mode: Demo data" : "Mode: Server offline";
                 return;
             }
 
@@ -72,31 +139,23 @@ public partial class MainWindow : Window
             var agentsJson = await _api.GetAgentsAsync();
             var catalog = await _api.GetCatalogAsync();
 
-            // If server is up but empty, keep UI informative
             if (incidents.Count == 0 && threats.Count == 0)
             {
                 ApplyDemo();
                 SetStatus(online: true, demo: true);
-                KpiMode.Text = "Live (empty → demo)";
+                KpiMode.Text = "Mode: Live (empty → demo)";
                 return;
             }
 
             BindIncidents(incidents);
             BindCampaigns(threats);
             BindAgentsFromJson(agentsJson);
-            if (catalog.Count > 0)
-            {
-                CatalogGrid.ItemsSource = catalog;
-            }
-            else
-            {
-                CatalogGrid.ItemsSource = DemoCatalog();
-            }
-
+            CatalogGrid.ItemsSource = catalog.Count > 0 ? catalog : DemoCatalog();
             UpdateKpis(incidents, threats, CountAgents(agentsJson));
             SetStatus(online: true, demo: false);
-            KpiMode.Text = "Live API";
+            KpiMode.Text = "Mode: Live API";
             LastRefreshText.Text = $"Updated {DateTime.Now:HH:mm:ss}";
+            SidebarCheckinText.Text = $"Last check-in: {DateTime.Now:HH:mm:ss}";
         }
         catch (Exception ex)
         {
@@ -119,15 +178,16 @@ public partial class MainWindow : Window
         var incidents = DemoData.Incidents();
         var campaigns = DemoData.Campaigns();
         var agents = DemoData.Agents();
-
         BindIncidents(incidents);
         BindCampaigns(campaigns);
         AgentsGrid.ItemsSource = agents;
         CatalogGrid.ItemsSource = DemoCatalog();
         UpdateKpis(incidents, campaigns, agents.Count);
-        KpiMode.Text = "Demo data";
+        KpiMode.Text = "Mode: Demo data";
         LastRefreshText.Text = $"Demo {DateTime.Now:HH:mm:ss}";
-        SubtitleText.Text = "Desktop app · demo scenario 10.0.105.35 → .190 → .200";
+        SidebarStatusText.Text = "Healthy (demo)";
+        SidebarCheckinText.Text = "Last check-in: 1 min ago";
+        PageSubtitle.Text = "Demo · 10.0.105.35 → .190 → .200";
     }
 
     private void BindIncidents(List<Incident> incidents)
@@ -135,15 +195,20 @@ public partial class MainWindow : Window
         _incidents = incidents
             .OrderByDescending(i => i.LastSeen ?? i.FirstSeen ?? DateTimeOffset.MinValue)
             .ToList();
+
+        var rows = _incidents.Select(i => new IncidentRow(i)).ToList();
         IncidentsGrid.ItemsSource = _incidents;
+        OverviewIncidentsGrid.ItemsSource = rows;
+
         if (_incidents.Count > 0)
         {
             IncidentsGrid.SelectedIndex = 0;
+            OverviewIncidentsGrid.SelectedIndex = 0;
             ShowIncident(_incidents[0]);
         }
         else
         {
-            IncidentDetailText.Text = "No incidents.";
+            SetDetail("No incidents.");
         }
     }
 
@@ -156,7 +221,7 @@ public partial class MainWindow : Window
             Title = c.Title,
             Severity = c.Severity.ToString(),
             HopCount = c.Hops.Count,
-            PathSummary = string.Join(" → ", c.Hops.Select(h => $"{h.FromIp ?? "?"}»{h.ToIp ?? "?"}"))
+            PathSummary = string.Join(" -> ", c.Hops.Select(h => (h.FromIp ?? "?") + ">>" + (h.ToIp ?? "?")))
         }).ToList();
         CampaignsList.ItemsSource = rows;
         if (rows.Count > 0)
@@ -167,7 +232,8 @@ public partial class MainWindow : Window
         else
         {
             PathVisualText.Text = "No lateral paths yet.";
-            CampaignDetailText.Text = "Install agents on source and destination hosts to track multi-hop threats.";
+            CampaignDetailText.Text = "Install agents on source and destination hosts.";
+            PathPreviewText.Text = "No path loaded";
         }
     }
 
@@ -176,11 +242,7 @@ public partial class MainWindow : Window
         var rows = new List<AgentRow>();
         foreach (var item in agentsJson)
         {
-            if (item is not JsonElement el)
-            {
-                continue;
-            }
-
+            if (item is not JsonElement el) continue;
             rows.Add(new AgentRow(
                 GetString(el, "agentId", "AgentId") ?? "?",
                 GetString(el, "computerName", "ComputerName") ?? "?",
@@ -209,24 +271,32 @@ public partial class MainWindow : Window
     {
         if (online && !demo)
         {
-            StatusBadge.Background = new SolidColorBrush(Color.FromRgb(0x14, 0x53, 0x2D));
-            StatusText.Text = "Online";
+            ProtectedBadge.Text = "Protected · Online";
+            SidebarStatusText.Text = "Healthy";
+            ProtectedBadge.Foreground = new SolidColorBrush(Color.FromRgb(0x16, 0x65, 0x34));
         }
         else if (demo)
         {
-            StatusBadge.Background = new SolidColorBrush(Color.FromRgb(0x78, 0x3A, 0x0B));
-            StatusText.Text = online ? "Live + Demo" : "Demo";
+            ProtectedBadge.Text = online ? "Protected · Demo" : "Demo Mode";
+            SidebarStatusText.Text = "Healthy (demo)";
         }
         else
         {
-            StatusBadge.Background = new SolidColorBrush(Color.FromRgb(0x7F, 0x1D, 0x1D));
-            StatusText.Text = "Offline";
+            ProtectedBadge.Text = "Offline";
+            SidebarStatusText.Text = "Unreachable";
         }
     }
 
     private void IncidentsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (IncidentsGrid.SelectedItem is Incident incident)
+        Incident? incident = null;
+        if (sender is DataGrid grid)
+        {
+            incident = grid.SelectedItem as Incident
+                       ?? (grid.SelectedItem as IncidentRow)?.Source;
+        }
+
+        if (incident is not null)
         {
             ShowIncident(incident);
         }
@@ -242,7 +312,13 @@ public partial class MainWindow : Window
 
     private void ShowIncident(Incident i)
     {
-        IncidentDetailText.Text = i.FormatDisplay();
+        SetDetail(i.FormatDisplay());
+    }
+
+    private void SetDetail(string text)
+    {
+        IncidentDetailText.Text = text;
+        IncidentDetailText2.Text = text;
     }
 
     private void ShowCampaign(ThreatCampaign c)
@@ -274,15 +350,15 @@ public partial class MainWindow : Window
 
         PathVisualText.Text = path.ToString().TrimEnd();
         CampaignDetailText.Text = c.FormatDisplay();
+        PathPreviewText.Text = path.ToString().TrimEnd();
     }
 
     private static List<ThreatCatalogEntry> DemoCatalog() =>
     [
         new() { Category = "credential_access", Name = "Internal Password Spray", DetectionRuleId = "INTERNAL_PASSWORD_SPRAY", MitreTechnique = "T1110.003", CrossHostTracking = "Source process/service → dest 4625" },
-        new() { Category = "lateral_movement", Name = "Multi Internal Targets", DetectionRuleId = "MULTIPLE_INTERNAL_TARGETS", MitreTechnique = "T1021", CrossHostTracking = "Fan-out map" },
+        new() { Category = "execution", Name = "Process From Temp Path", DetectionRuleId = "PROCESS_FROM_TEMP_PATH", MitreTechnique = "T1204", CrossHostTracking = "4688 path anomaly" },
         new() { Category = "lateral_movement", Name = "Network Logon Burst", DetectionRuleId = "NETWORK_LOGON_BURST", MitreTechnique = "T1021.002", CrossHostTracking = "Type 3 success chain" },
-        new() { Category = "persistence", Name = "New Service", DetectionRuleId = "NEW_SERVICE_INSTALLED", MitreTechnique = "T1543.003", CrossHostTracking = "After pivot foothold" },
-        new() { Category = "privilege_escalation", Name = "Privileged Group Change", DetectionRuleId = "PRIVILEGED_GROUP_CHANGE", MitreTechnique = "T1098", CrossHostTracking = "Local after lateral success" }
+        new() { Category = "persistence", Name = "New Service", DetectionRuleId = "NEW_SERVICE_INSTALLED", MitreTechnique = "T1543.003", CrossHostTracking = "After pivot foothold" }
     ];
 
     private static string? GetString(JsonElement el, params string[] names)
@@ -290,9 +366,7 @@ public partial class MainWindow : Window
         foreach (var n in names)
         {
             if (el.TryGetProperty(n, out var p) && p.ValueKind == JsonValueKind.String)
-            {
                 return p.GetString();
-            }
         }
 
         return null;
@@ -302,13 +376,9 @@ public partial class MainWindow : Window
     {
         foreach (var n in names)
         {
-            if (el.TryGetProperty(n, out var p))
-            {
-                if (p.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(p.GetString(), out var dto))
-                {
-                    return dto;
-                }
-            }
+            if (el.TryGetProperty(n, out var p) && p.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(p.GetString(), out var dto))
+                return dto;
         }
 
         return null;
@@ -328,5 +398,15 @@ public partial class MainWindow : Window
         public string Severity { get; init; } = "";
         public int HopCount { get; init; }
         public string PathSummary { get; init; } = "";
+    }
+
+    private sealed class IncidentRow
+    {
+        public Incident Source { get; }
+        public string Severity => Source.Severity.ToString();
+        public string Title => Source.Title;
+        public string Route => $"{Source.SourceIp} → {Source.DestinationIp}";
+        public int FailedAttempts => Source.FailedAttempts;
+        public IncidentRow(Incident source) => Source = source;
     }
 }

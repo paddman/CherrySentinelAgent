@@ -57,12 +57,20 @@ src/   tests/   installer/   docs/   config/   rules/
 
 ## Desktop Dashboard (native WPF app — not web)
 
+UI inspired by `imggui/` design kit (sidebar + overview cards). Brand icon: `assets/icons/CherrySentinel.ico`.
+
 ```powershell
+# Run
 dotnet run --project src/CherrySentinel.Dashboard/CherrySentinel.Dashboard.csproj -c Release
+
+# Publish + install (elevated)
+.\installer\publish-and-install.ps1 -InstallDashboard
+# or:
+dotnet publish src\CherrySentinel.Dashboard\CherrySentinel.Dashboard.csproj -c Release -r win-x64 -o artifacts\dashboard-win-x64
+.\installer\install-dashboard.ps1 -SourceDir .\artifacts\dashboard-win-x64 -StartAfterInstall
 ```
 
-Shows incidents, multi-hop lateral paths, agents, and threat catalog inside a Windows app.  
-Uses Central API when available; **Load Demo** works offline.
+Installs to `C:\Program Files\Cherry Sentinel\Dashboard` with Desktop + Start Menu shortcuts (icon).
 
 ## Build / test
 

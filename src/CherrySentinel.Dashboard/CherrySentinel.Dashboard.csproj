@@ -5,15 +5,21 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <ApplicationIcon />
+    <ApplicationIcon>Assets\CherrySentinel.ico</ApplicationIcon>
     <AssemblyName>CherrySentinel.Dashboard</AssemblyName>
     <RootNamespace>CherrySentinel.Dashboard</RootNamespace>
     <Product>Cherry Sentinel Dashboard</Product>
-    <Description>Native Windows dashboard for Cherry Sentinel incidents and lateral threat paths</Description>
+    <Description>Native Windows dashboard for Cherry Sentinel</Description>
+    <Version>1.0.0</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\CherrySentinel.Shared\CherrySentinel.Shared.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\app-32.png" />
+    <Resource Include="Assets\app-256.png" />
+    <Content Include="Assets\CherrySentinel.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

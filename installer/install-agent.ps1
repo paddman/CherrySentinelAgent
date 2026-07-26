@@ -119,6 +119,16 @@ Write-Step "Copying binaries"
 Copy-Item -Path (Join-Path $SourceDir "*") -Destination $InstallDir -Recurse -Force
 Write-Ok "Files copied to $InstallDir"
 
+# Brand icon for Start Menu / explorer
+$repoIcon = Join-Path $PSScriptRoot "..\assets\icons\CherrySentinel.ico"
+$iconDest = Join-Path $InstallDir "CherrySentinel.ico"
+if (Test-Path $repoIcon) {
+    Copy-Item $repoIcon $iconDest -Force
+    Write-Ok "Icon copied"
+} elseif (Test-Path (Join-Path $SourceDir "CherrySentinel.ico")) {
+    Copy-Item (Join-Path $SourceDir "CherrySentinel.ico") $iconDest -Force
+}
+
 # 9) Configure appsettings
 $appsettings = Join-Path $InstallDir "appsettings.json"
 if (Test-Path $appsettings) {
@@ -188,12 +198,28 @@ if ($proc) {
     Write-Host "WARNING: process not observed yet; review $LogDir" -ForegroundColor Yellow
 }
 
+# Start Menu folder + logs shortcut with brand icon
+try {
+    $sm = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\Cherry Sentinel"
+    New-Item -ItemType Directory -Force -Path $sm | Out-Null
+    $w = New-Object -ComObject WScript.Shell
+    $logShortcut = $w.CreateShortcut((Join-Path $sm "Agent Logs.lnk"))
+    $logShortcut.TargetPath = $LogDir
+    if (Test-Path $iconDest) { $logShortcut.IconLocation = "$iconDest,0" }
+    $logShortcut.Description = "Cherry Sentinel Agent logs"
+    $logShortcut.Save()
+    Write-Ok "Start Menu shortcut created"
+} catch {
+    Write-Host "NOTE: Start Menu shortcut skipped: $_" -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host "Install complete." -ForegroundColor Green
 Write-Host "  Service : $ServiceName ($DisplayName)"
 Write-Host "  Install : $InstallDir"
 Write-Host "  Data    : $AgentData"
 Write-Host "  Logs    : $LogDir"
+Write-Host "  Icon    : $iconDest"
 Write-Host "  Mode    : DetectOnly (no auto block/kill)"
 Write-Host ""
 Write-Host "Rollback instructions:" -ForegroundColor Yellow

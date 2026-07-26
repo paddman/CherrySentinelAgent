@@ -10,8 +10,12 @@
     <PublishReadyToRun>false</PublishReadyToRun>
     <Description>Cherry Sentinel Endpoint Security Monitoring Agent (Windows Service)</Description>
     <AssemblyName>CherrySentinel.Agent</AssemblyName>
+    <ApplicationIcon>..\..\assets\icons\CherrySentinel.ico</ApplicationIcon>
     <NoWarn>$(NoWarn);NU1903</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\assets\icons\CherrySentinel.ico" Link="CherrySentinel.ico" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\assets\icons\CherrySentinel.ico')" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
