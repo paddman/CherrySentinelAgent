@@ -35,11 +35,13 @@ SetupMutex=CherrySentinelSetupMutex
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-; Installer side art (from imggui 5b8ee925 vertical + face crop)
-WizardImageFile={#SourceRoot}\assets\installer\WizardImage.png
-WizardSmallImageFile={#SourceRoot}\assets\installer\WizardSmallImage.png
+; Side panel art — solid 24bpp BMP (PNG alpha often fails to paint in Setup UI)
+; Sizes: 164x314 + @2x 328x628 ; small 64x64 + @2x 128x128
+WizardImageFile={#SourceRoot}\assets\installer\WizardImage.bmp,{#SourceRoot}\assets\installer\WizardImage@2x.bmp
+WizardSmallImageFile={#SourceRoot}\assets\installer\WizardSmallImage.bmp,{#SourceRoot}\assets\installer\WizardSmallImage@2x.bmp
 WizardImageStretch=yes
-WizardImageAlphaFormat=defined
+WizardImageBackColor=clWhite
+WizardImageAlphaFormat=none
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -74,7 +76,6 @@ WizardSelectDir=เลือกตำแหน่งติดตั้ง
 WizardSelectComponents=เลือกประเภทการติดตั้ง
 WizardReady=พร้อมติดตั้ง
 WizardInstalling=กำลังติดตั้ง...
-WizardFinished=เสร็จสิ้น
 StatusExtractFiles=กำลังติดตั้งไฟล์...
 
 [Types]
