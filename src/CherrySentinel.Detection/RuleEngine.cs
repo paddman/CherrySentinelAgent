@@ -128,6 +128,7 @@ public sealed class RuleEngine : IDetectionEngine
             {
                 "sequence" => EvaluateSequence(rule, deduped, now),
                 "network" => EvaluateNetwork(rule, recentConnections, now),
+                "presence" => EvaluatePresence(rule, deduped, now),
                 _ => EvaluateThreshold(rule, deduped, now)
             };
 
@@ -164,6 +165,7 @@ public sealed class RuleEngine : IDetectionEngine
         var scoped = events
             .Where(e => e.TimestampUtc >= windowStart && e.TimestampUtc <= now)
             .Where(e => rule.EventIds.Count == 0 || rule.EventIds.Contains(e.EventId))
+            .Where(e => rule.LogonTypes.Count == 0 || (e.LogonType.HasValue && rule.LogonTypes.Contains(e.LogonType.Value)))
             .ToList();
 
         if (rule.SuspiciousUsernames.Count > 0)
@@ -185,6 +187,7 @@ public sealed class RuleEngine : IDetectionEngine
             "DISTRIBUTED_PASSWORD_SPRAY" => scoped.GroupBy(e => Norm(e.ComputerName)),
             "BRUTE_FORCE_SINGLE_ACCOUNT" => scoped.GroupBy(e => $"{Norm(e.SourceIp)}|{Norm(e.Username)}|{Norm(e.ComputerName)}"),
             "SUSPICIOUS_ACCOUNT_NAMES" => scoped.GroupBy(e => Norm(e.Username)),
+            "NETWORK_LOGON_BURST" or "RDP_LOGON_BURST" => scoped.GroupBy(e => $"{Norm(e.SourceIp)}|{Norm(e.ComputerName)}"),
             _ => scoped.GroupBy(e => $"{Norm(e.SourceIp)}|{Norm(e.Username)}")
         };
 
@@ -204,6 +207,37 @@ public sealed class RuleEngine : IDetectionEngine
                 continue;
 
             yield return BuildAlert(rule, list, distinctUsers, 0, now);
+        }
+    }
+
+    /// <summary>
+    /// Presence rules: alert when N occurrences of specific event IDs appear (service install, task, account create).
+    /// </summary>
+    private IEnumerable<DetectionAlert> EvaluatePresence(
+        DetectionRuleDefinition rule,
+        IReadOnlyList<SecurityEventRecord> events,
+        DateTimeOffset now)
+    {
+        var windowStart = now.AddMinutes(-rule.WindowMinutes);
+        var scoped = events
+            .Where(e => e.TimestampUtc >= windowStart && e.TimestampUtc <= now)
+            .Where(e => rule.EventIds.Count == 0 || rule.EventIds.Contains(e.EventId))
+            .ToList();
+
+        if (scoped.Count < Math.Max(1, rule.MinEventCount))
+        {
+            yield break;
+        }
+
+        foreach (var g in scoped.GroupBy(e => $"{e.EventId}|{Norm(e.ServiceName)}|{Norm(e.TaskName)}|{Norm(e.Username)}|{Norm(e.ComputerName)}"))
+        {
+            var list = g.ToList();
+            if (list.Count < Math.Max(1, rule.MinEventCount))
+            {
+                continue;
+            }
+
+            yield return BuildAlert(rule, list, 0, 0, now);
         }
     }
 

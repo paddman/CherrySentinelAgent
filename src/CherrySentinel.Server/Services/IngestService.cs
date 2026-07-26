@@ -8,12 +8,18 @@ public sealed class IngestService
 {
     private readonly PostgresStore _store;
     private readonly CrossHostCorrelator _correlator;
+    private readonly LateralMovementTracker _lateral;
     private readonly ILogger<IngestService> _logger;
 
-    public IngestService(PostgresStore store, CrossHostCorrelator correlator, ILogger<IngestService> logger)
+    public IngestService(
+        PostgresStore store,
+        CrossHostCorrelator correlator,
+        LateralMovementTracker lateral,
+        ILogger<IngestService> logger)
     {
         _store = store;
         _correlator = correlator;
+        _lateral = lateral;
         _logger = logger;
     }
 
@@ -56,11 +62,20 @@ public sealed class IngestService
                 _logger.LogWarning("INCIDENT\n{Display}", incident.FormatDisplay());
             }
 
+            // Follow threats across hosts (A→B→C) without performing any offensive action.
+            var campaigns = _lateral.IngestIncidents(incidents);
+            foreach (var campaign in campaigns.Where(c => c.Hops.Count > 1))
+            {
+                _logger.LogWarning("LATERAL PATH\n{Display}", campaign.FormatDisplay());
+            }
+
             return new IngestResponse
             {
                 Accepted = true,
                 ReceivedCount = count,
-                Message = "ok",
+                Message = campaigns.Count > 0
+                    ? $"ok; threats_tracked={campaigns.Count}; multi_hop={campaigns.Count(c => c.Hops.Count > 1)}"
+                    : "ok",
                 CreatedIncidentIds = incidents.Select(i => i.IncidentId).ToList()
             };
         }

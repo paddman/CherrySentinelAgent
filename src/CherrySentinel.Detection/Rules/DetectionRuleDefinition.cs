@@ -41,6 +41,15 @@ public sealed class DetectionRuleDefinition
     // Network rules
     public List<int> AuthPorts { get; set; } = [];
 
+    /// <summary>Optional logon type filter (e.g. 3 network, 10 remote interactive).</summary>
+    public List<int> LogonTypes { get; set; } = [];
+
+    /// <summary>Threat category tag for reporting (password_spray, lateral_movement, persistence, privilege_escalation).</summary>
+    public string Category { get; set; } = string.Empty;
+
+    /// <summary>MITRE technique id when known (e.g. T1110.003).</summary>
+    public string MitreTechnique { get; set; } = string.Empty;
+
     public Severity ParsedSeverity =>
         Enum.TryParse<Severity>(Severity, true, out var s) ? s : Shared.Enums.Severity.Medium;
 }

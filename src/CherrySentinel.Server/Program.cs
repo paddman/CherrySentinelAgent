@@ -32,6 +32,7 @@ builder.Services.Configure<PostgresOptions>(builder.Configuration.GetSection(Pos
 builder.Services.Configure<CorrelationOptions>(builder.Configuration.GetSection(CorrelationOptions.SectionName));
 builder.Services.AddSingleton<PostgresStore>();
 builder.Services.AddSingleton<CrossHostCorrelator>();
+builder.Services.AddSingleton<LateralMovementTracker>();
 builder.Services.AddSingleton<IngestService>();
 builder.Services.AddSingleton<ActionService>();
 
@@ -207,6 +208,42 @@ app.MapGet("/api/v1/actions/{id}", async (string id, ActionService actions) =>
 });
 
 app.MapGet("/api/v1/agents", async (PostgresStore store) => Results.Ok(await store.ListAgentsAsync()));
+
+// Threat catalog + multi-host lateral tracking (detect/track only)
+app.MapGet("/api/v1/threats/catalog", (LateralMovementTracker tracker) =>
+    Results.Ok(tracker.GetThreatCatalog()));
+
+app.MapGet("/api/v1/threats", (LateralMovementTracker tracker, int take = 100) =>
+    Results.Ok(tracker.ListCampaigns(take)));
+
+app.MapGet("/api/v1/threats/{id}", (string id, LateralMovementTracker tracker) =>
+{
+    var c = tracker.GetCampaign(id);
+    return c is null ? Results.NotFound() : Results.Ok(c);
+});
+
+app.MapGet("/api/v1/threats/{id}/path", (string id, LateralMovementTracker tracker) =>
+{
+    var c = tracker.GetCampaign(id);
+    if (c is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(new
+    {
+        campaignId = c.CampaignId,
+        display = c.FormatDisplay(),
+        hops = c.Hops,
+        hosts = c.InvolvedHosts,
+        ips = c.InvolvedIps,
+        users = c.InvolvedUsernames,
+        categories = c.ThreatCategories
+    });
+});
+
+app.MapGet("/api/v1/threats/by-host/{hostOrIp}", (string hostOrIp, LateralMovementTracker tracker) =>
+    Results.Ok(tracker.FindByHostOrIp(hostOrIp)));
 
 Log.Information("Cherry Sentinel Server starting");
 app.Run();
