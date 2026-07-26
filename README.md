@@ -55,22 +55,35 @@ CherrySentinel.sln
 src/   tests/   installer/   docs/   config/   rules/
 ```
 
-## Desktop Dashboard (native WPF app — not web)
+## Installer (Setup.exe)
 
-UI inspired by `imggui/` design kit (sidebar + overview cards). Brand icon: `assets/icons/CherrySentinel.ico`.
+สร้างตัวติดตั้ง Windows แบบ **EXE** (Inno Setup):
 
 ```powershell
-# Run
-dotnet run --project src/CherrySentinel.Dashboard/CherrySentinel.Dashboard.csproj -c Release
-
-# Publish + install (elevated)
-.\installer\publish-and-install.ps1 -InstallDashboard
-# or:
-dotnet publish src\CherrySentinel.Dashboard\CherrySentinel.Dashboard.csproj -c Release -r win-x64 -o artifacts\dashboard-win-x64
-.\installer\install-dashboard.ps1 -SourceDir .\artifacts\dashboard-win-x64 -StartAfterInstall
+cd C:\data_nt\CherrySentinelAgent
+.\installer\build-setup.ps1
 ```
 
-Installs to `C:\Program Files\Cherry Sentinel\Dashboard` with Desktop + Start Menu shortcuts (icon).
+ได้ไฟล์:
+
+```text
+artifacts\setup\CherrySentinel-Setup-1.0.0.exe
+```
+
+ดับเบิลคลิก (Run as Administrator) แล้วเลือก:
+- **Full** = Agent (Windows Service) + Dashboard
+- **Agent only** / **Dashboard only**
+
+ติดตั้งไปที่ `C:\Program Files\Cherry Sentinel\` พร้อมไอคอน + Start Menu / Desktop
+
+## Desktop Dashboard (native WPF app — not web)
+
+UI inspired by `imggui/` design kit. Brand icon: `assets/icons/CherrySentinel.ico`.
+
+```powershell
+dotnet run --project src/CherrySentinel.Dashboard/CherrySentinel.Dashboard.csproj -c Release
+# หรือใช้ Setup.exe ด้านบน
+```
 
 ## Build / test
 

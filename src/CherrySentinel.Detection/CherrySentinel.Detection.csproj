@@ -12,7 +12,6 @@
     <ProjectReference Include="..\CherrySentinel.Core\CherrySentinel.Core.csproj" />
     <ProjectReference Include="..\CherrySentinel.Shared\CherrySentinel.Shared.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="..\..\rules\default-rules.json" Link="default-rules.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+  <!-- rules are loaded from Agent config/rules.json; do not copy duplicate into publish root -->
 </Project>
+

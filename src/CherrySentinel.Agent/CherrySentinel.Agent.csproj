@@ -36,8 +36,14 @@
   <ItemGroup>
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="appsettings.Production.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="default-rules.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\config\rules.json" Link="config\rules.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\config\allowlist.json" Link="config\allowlist.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- Avoid duplicate default-rules.json from Detection project during publish -->
+  <Target Name="RemoveDuplicateRulesFromPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Filename)%(Extension)' == 'default-rules.json'" />
+    </ItemGroup>
+  </Target>
 </Project>
+
