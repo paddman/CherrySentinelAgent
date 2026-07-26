@@ -15,7 +15,6 @@ public partial class MainWindow : Window
 {
     private CentralApiClient _api;
     private readonly DispatcherTimer _autoRefresh;
-    private bool _usingDemo;
     private List<Incident> _incidents = [];
     private List<ThreatCampaign> _campaigns = [];
     private readonly Dictionary<string, FrameworkElement> _pages;
@@ -49,6 +48,7 @@ public partial class MainWindow : Window
             ["Settings"] = NavSettings
         };
 
+        ClearAll();
         _autoRefresh = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _autoRefresh.Tick += async (_, _) => await RefreshAsync(silent: true);
         _autoRefresh.Start();
@@ -72,8 +72,7 @@ public partial class MainWindow : Window
     {
         MessageBox.Show(
             this,
-            "Detect-only UI: เชื่อมปุ่มนี้กับ Response API ของ Central ได้ในขั้นถัดไป\n" +
-            "(ต้องมี approval — ไม่ block/kill อัตโนมัติ)",
+            "Detect-only: response actions require Central approval API.\nNo mock execution.",
             "Cherry Sentinel Agent",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
@@ -99,11 +98,6 @@ public partial class MainWindow : Window
     }
 
     private async void RefreshBtn_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
-    private void DemoBtn_Click(object sender, RoutedEventArgs e)
-    {
-        ApplyDemo();
-        SetStatus(false, true);
-    }
 
     private async void ApplySettings_Click(object sender, RoutedEventArgs e)
     {
@@ -126,10 +120,17 @@ public partial class MainWindow : Window
             var healthy = await _api.HealthAsync();
             if (!healthy)
             {
-                if (!_usingDemo) ApplyDemo();
-                SetStatus(false, _usingDemo);
-                KpiMode.Text = _usingDemo ? "Mode: Demo data" : "Mode: Server offline";
-                ModeLabel.Text = KpiMode.Text;
+                ClearAll();
+                SetStatus(online: false);
+                KpiMode.Text = "Mode: Server offline";
+                ModeLabel.Text = "Offline — no data";
+                SidebarStatusText.Text = "Unreachable";
+                SidebarCheckinText.Text = "Last check-in: —";
+                if (!silent)
+                {
+                    ProtectedSub.Text = "Cannot reach Central API — showing empty (no mock data)";
+                }
+
                 return;
             }
 
@@ -138,50 +139,73 @@ public partial class MainWindow : Window
             var agentsJson = await _api.GetAgentsAsync();
             var catalog = await _api.GetCatalogAsync();
 
-            if (incidents.Count == 0 && threats.Count == 0)
-            {
-                ApplyDemo();
-                SetStatus(true, true);
-                KpiMode.Text = "Mode: Live (empty → demo)";
-                ModeLabel.Text = KpiMode.Text;
-                return;
-            }
-
-            _usingDemo = false;
             BindAll(incidents, threats, agentsJson, catalog);
-            SetStatus(true, false);
+            SetStatus(online: true);
             KpiMode.Text = "Mode: Live API";
             ModeLabel.Text = "Live · " + DateTime.Now.ToString("HH:mm:ss");
             LastRefreshText.Text = $"Updated {DateTime.Now:HH:mm:ss}";
             SidebarCheckinText.Text = $"Last check-in: {DateTime.Now:HH:mm:ss}";
+            SidebarStatusText.Text = "Healthy";
         }
         catch (Exception ex)
         {
+            ClearAll();
+            SetStatus(online: false);
+            KpiMode.Text = "Mode: Error";
+            ModeLabel.Text = "Error";
             if (!silent)
                 MessageBox.Show(this, ex.Message, "Refresh failed", MessageBoxButton.OK, MessageBoxImage.Warning);
-            SetStatus(false, _usingDemo);
         }
     }
 
-    private void ApplyDemo()
+    private void ClearAll()
     {
-        _usingDemo = true;
-        BindAll(DemoData.Incidents(), DemoData.Campaigns(), [], null, useDemoAgents: true);
-        KpiMode.Text = "Mode: Demo data";
-        ModeLabel.Text = "Demo · 10.0.105.35 → .190 → .200";
-        LastRefreshText.Text = $"Demo {DateTime.Now:HH:mm:ss}";
-        SidebarCheckinText.Text = "Last check-in: 1 min ago";
-        SidebarStatusText.Text = "Healthy";
+        _incidents = [];
+        _campaigns = [];
+        IncidentsGrid.ItemsSource = null;
+        OverviewIncidentsGrid.ItemsSource = null;
+        AgentsGrid.ItemsSource = null;
+        CatalogGrid.ItemsSource = null;
+        CampaignsList.ItemsSource = null;
+        TopSourcesList.ItemsSource = null;
+        TopDestList.ItemsSource = null;
+        Actions.Clear();
+        IncidentBadge.Text = "0";
+        KpiIncidents.Text = "0";
+        KpiCampaigns.Text = "0";
+        KpiMultiHop.Text = "0";
+        KpiAgents.Text = "0";
+        FailedLoginPeak.Text = "0";
+        SprayUsersText.Text = "0";
+        ProcessEventsText.Text = "0";
+        PathVisualText.Text = "No data";
+        CampaignDetailText.Text = "Connect to Central API and wait for agent telemetry.";
+        ClearIncidentDetail();
+    }
+
+    private void ClearIncidentDetail()
+    {
+        DetailSeverityText.Text = "—";
+        D_Title.Text = "—";
+        D_Source.Text = "—";
+        D_Dest.Text = "—";
+        D_Process.Text = "—";
+        D_Service.Text = "—";
+        D_Logon.Text = "—";
+        D_Failed.Text = "—";
+        D_Users.Text = "—";
+        D_Success.Text = "—";
     }
 
     private void BindAll(
         List<Incident> incidents,
         List<ThreatCampaign> campaigns,
         List<object> agentsJson,
-        List<ThreatCatalogEntry>? catalog,
-        bool useDemoAgents = false)
+        List<ThreatCatalogEntry> catalog)
     {
-        _incidents = incidents.OrderByDescending(i => i.LastSeen ?? i.FirstSeen ?? DateTimeOffset.MinValue).ToList();
+        _incidents = incidents
+            .OrderByDescending(i => i.LastSeen ?? i.FirstSeen ?? DateTimeOffset.MinValue)
+            .ToList();
         _campaigns = campaigns.OrderByDescending(c => c.LastSeenUtc).ToList();
 
         IncidentsGrid.ItemsSource = _incidents;
@@ -192,46 +216,33 @@ public partial class MainWindow : Window
         KpiCampaigns.Text = _campaigns.Count.ToString();
         KpiMultiHop.Text = _campaigns.Count(c => c.Hops.Count >= 2).ToString();
 
-        if (useDemoAgents)
-        {
-            var agents = DemoData.Agents();
-            AgentsGrid.ItemsSource = agents;
-            KpiAgents.Text = agents.Count.ToString();
-        }
-        else
-        {
-            BindAgentsFromJson(agentsJson);
-            KpiAgents.Text = Math.Max(agentsJson.Count, 0).ToString();
-            if (agentsJson.Count == 0)
-            {
-                AgentsGrid.ItemsSource = DemoData.Agents();
-                KpiAgents.Text = DemoData.Agents().Count.ToString();
-            }
-        }
+        var agents = ParseAgents(agentsJson);
+        AgentsGrid.ItemsSource = agents;
+        KpiAgents.Text = agents.Count.ToString();
 
-        CatalogGrid.ItemsSource = catalog is { Count: > 0 } ? catalog : DemoCatalog();
+        CatalogGrid.ItemsSource = catalog;
 
-        // Analytics widgets from incidents
-        var topSources = _incidents
+        TopSourcesList.ItemsSource = _incidents
             .Where(i => !string.IsNullOrWhiteSpace(i.SourceIp))
             .GroupBy(i => i.SourceIp!)
             .Select(g => new Kv(g.Key, g.Sum(x => Math.Max(1, x.FailedAttempts))))
-            .OrderByDescending(x => x.Value).Take(5).ToList();
-        TopSourcesList.ItemsSource = topSources;
+            .OrderByDescending(x => x.Value)
+            .Take(5)
+            .ToList();
 
-        var topDest = _incidents
+        TopDestList.ItemsSource = _incidents
             .Where(i => !string.IsNullOrWhiteSpace(i.DestinationIp))
             .GroupBy(i => i.DestinationIp!)
             .Select(g => new Kv(g.Key, g.Sum(x => Math.Max(1, x.FailedAttempts))))
-            .OrderByDescending(x => x.Value).Take(5).ToList();
-        TopDestList.ItemsSource = topDest;
+            .OrderByDescending(x => x.Value)
+            .Take(5)
+            .ToList();
 
         var peakFailed = _incidents.Sum(i => i.FailedAttempts);
-        FailedLoginPeak.Text = peakFailed > 0 ? peakFailed.ToString() : _incidents.Count.ToString();
-        SprayUsersText.Text = _incidents.Max(i => (int?)i.DistinctUsernames)?.ToString() ?? "0";
+        FailedLoginPeak.Text = peakFailed.ToString();
+        SprayUsersText.Text = (_incidents.Count == 0 ? 0 : _incidents.Max(i => i.DistinctUsernames)).ToString();
         ProcessEventsText.Text = _incidents.Count(i => i.ProcessId is > 0).ToString();
 
-        // Campaigns list
         CampaignsList.ItemsSource = _campaigns.Select(c => new CampaignRow
         {
             Campaign = c,
@@ -239,17 +250,16 @@ public partial class MainWindow : Window
         }).ToList();
         CampaignsList.DisplayMemberPath = "Display";
 
-        // Response actions (derived / demo)
         Actions.Clear();
-        if (_incidents.Count > 0)
+        // Only real-ish derived rows from live incidents (log-only), never fake history
+        foreach (var top in _incidents.Take(5))
         {
-            var top = _incidents[0];
-            Actions.Add(new ResponseActionRow("just now", "LogOnly", top.DestinationIp ?? "-", top.RuleId, "Completed"));
-            Actions.Add(new ResponseActionRow("—", "Capture Evidence", top.DestinationIp ?? "-", "Operator", "PendingApproval"));
-        }
-        else
-        {
-            foreach (var a in DemoActions()) Actions.Add(a);
+            Actions.Add(new ResponseActionRow(
+                RelTime(top.LastSeen ?? top.FirstSeen),
+                "LogOnly",
+                top.DestinationIp ?? top.DestinationHost ?? "-",
+                top.RuleId,
+                "Completed"));
         }
 
         if (_incidents.Count > 0)
@@ -258,15 +268,24 @@ public partial class MainWindow : Window
             IncidentsGrid.SelectedIndex = 0;
             ShowIncident(_incidents[0]);
         }
+        else
+        {
+            ClearIncidentDetail();
+        }
 
         if (_campaigns.Count > 0)
         {
             CampaignsList.SelectedIndex = 0;
             ShowCampaign(_campaigns[0]);
         }
+        else
+        {
+            PathVisualText.Text = "No lateral paths";
+            CampaignDetailText.Text = "No threat campaigns from Central yet.";
+        }
     }
 
-    private void BindAgentsFromJson(List<object> agentsJson)
+    private static List<AgentRow> ParseAgents(List<object> agentsJson)
     {
         var rows = new List<AgentRow>();
         foreach (var item in agentsJson)
@@ -281,28 +300,20 @@ public partial class MainWindow : Window
                 GetTime(el, "lastSeenUtc", "LastSeenUtc") ?? DateTimeOffset.MinValue));
         }
 
-        AgentsGrid.ItemsSource = rows;
+        return rows;
     }
 
-    private void SetStatus(bool online, bool demo)
+    private void SetStatus(bool online)
     {
-        if (online && !demo)
+        if (online)
         {
             ProtectedTitle.Text = "Protected";
-            ProtectedSub.Text = "All systems operational · Live";
-            SidebarStatusText.Text = "Healthy";
-        }
-        else if (demo)
-        {
-            ProtectedTitle.Text = "Protected";
-            ProtectedSub.Text = online ? "Live API empty — showing demo" : "Demo mode";
-            SidebarStatusText.Text = "Healthy";
+            ProtectedSub.Text = "Connected to Central API";
         }
         else
         {
             ProtectedTitle.Text = "Offline";
             ProtectedSub.Text = "Central server unreachable";
-            SidebarStatusText.Text = "Unreachable";
         }
     }
 
@@ -328,9 +339,9 @@ public partial class MainWindow : Window
                 new SolidColorBrush(Color.FromRgb(0xF0, 0x44, 0x44)),
             Shared.Enums.Severity.Medium =>
                 new SolidColorBrush(Color.FromRgb(0xFF, 0x9F, 0x1A)),
-            _ => new SolidColorBrush(Color.FromRgb(0xFF, 0xE9, 0xBB))
+            _ => new SolidColorBrush(Color.FromRgb(0x94, 0xA3, 0xB8))
         };
-        D_Title.Text = i.Title;
+        D_Title.Text = string.IsNullOrWhiteSpace(i.Title) ? "—" : i.Title;
         D_Source.Text = i.SourceIp ?? "—";
         D_Dest.Text = i.DestinationIp ?? i.DestinationHost ?? "—";
         D_Process.Text = i.ProcessName is null ? "—" : $"{i.ProcessName} (PID {i.ProcessId})";
@@ -356,19 +367,15 @@ public partial class MainWindow : Window
         CampaignDetailText.Text = c.FormatDisplay();
     }
 
-    private static List<ThreatCatalogEntry> DemoCatalog() =>
-    [
-        new() { Category = "credential_access", Name = "Internal Password Spray", DetectionRuleId = "INTERNAL_PASSWORD_SPRAY", MitreTechnique = "T1110.003", CrossHostTracking = "Source process → dest 4625" },
-        new() { Category = "execution", Name = "Process From Temp", DetectionRuleId = "PROCESS_FROM_TEMP_PATH", MitreTechnique = "T1204", CrossHostTracking = "4688" },
-        new() { Category = "lateral_movement", Name = "Network Logon Burst", DetectionRuleId = "NETWORK_LOGON_BURST", MitreTechnique = "T1021.002", CrossHostTracking = "Type 3 chain" }
-    ];
-
-    private static IEnumerable<ResponseActionRow> DemoActions() =>
-    [
-        new("2 min ago", "Investigate", "10.0.105.190", "Auto Response (Password Spray)", "Completed"),
-        new("3 min ago", "Capture Evidence", "10.0.105.190", "Auto Response (Password Spray)", "Completed"),
-        new("5 min ago", "Block Destination", "10.0.105.190", "Pending approval", "PendingApproval")
-    ];
+    private static string RelTime(DateTimeOffset? ts)
+    {
+        if (ts is null) return "—";
+        var d = DateTimeOffset.UtcNow - ts.Value;
+        if (d.TotalMinutes < 1) return "just now";
+        if (d.TotalHours < 1) return $"{(int)d.TotalMinutes} min ago";
+        if (d.TotalDays < 1) return $"{(int)d.TotalHours} hr ago";
+        return ts.Value.ToString("g");
+    }
 
     private static string? GetString(JsonElement el, params string[] names)
     {
@@ -411,6 +418,14 @@ public partial class MainWindow : Window
     }
 
     private sealed record Kv(string Key, int Value);
+
+    private sealed record AgentRow(
+        string AgentId,
+        string ComputerName,
+        string? HostIp,
+        string? Version,
+        string? Status,
+        DateTimeOffset LastSeenUtc);
 
     public sealed class ResponseActionRow
     {

@@ -109,8 +109,7 @@
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
           <TextBox x:Name="ServerUrlBox" Width="220" Text="https://localhost:7443" Padding="8,5"
                    Margin="0,0,8,0" VerticalAlignment="Center" BorderBrush="#DCE5F2"/>
-          <Button Content="Refresh" Style="{StaticResource PrimaryButton}" Click="RefreshBtn_Click" Padding="12,8" Margin="0,0,4,0"/>
-          <Button Content="Demo" Style="{StaticResource OutlineButton}" Click="DemoBtn_Click" Padding="12,8" Margin="0,0,8,0"/>
+          <Button Content="Refresh" Style="{StaticResource PrimaryButton}" Click="RefreshBtn_Click" Padding="12,8" Margin="0,0,8,0"/>
           <Button Content="—" Click="Minimize_Click" Background="Transparent" BorderThickness="0" Padding="12"/>
           <Button Content="□" Click="Maximize_Click" Background="Transparent" BorderThickness="0" Padding="12"/>
           <Button Content="×" Click="Close_Click" Background="Transparent" BorderThickness="0" Padding="12"/>
@@ -125,7 +124,7 @@
         <StackPanel Margin="16,14,10,16">
           <DockPanel Margin="6,0,6,8">
             <TextBlock Text="Threat Overview" FontWeight="Bold" FontSize="19"/>
-            <TextBlock x:Name="ModeLabel" Text="Demo / Live" Foreground="#6C7892" DockPanel.Dock="Right" VerticalAlignment="Center"/>
+            <TextBlock x:Name="ModeLabel" Text="Live only — no mock data" Foreground="#6C7892" DockPanel.Dock="Right" VerticalAlignment="Center"/>
           </DockPanel>
           <UniformGrid Columns="4">
             <Border Style="{StaticResource Card}">
@@ -351,8 +350,9 @@
           <TextBlock x:Name="LastRefreshText" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,16"/>
           <StackPanel Orientation="Horizontal">
             <Button Content="Apply &amp; Refresh" Style="{StaticResource PrimaryButton}" Click="ApplySettings_Click"/>
-            <Button Content="Load Demo Data" Style="{StaticResource OutlineButton}" Click="DemoBtn_Click"/>
           </StackPanel>
+          <TextBlock Text="No mock/demo data is loaded. Empty UI means no live telemetry yet."
+                     Foreground="{StaticResource MutedBrush}" Margin="0,16,0,0" TextWrapping="Wrap"/>
         </StackPanel>
       </Border>
     </Grid>
