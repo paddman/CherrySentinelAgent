@@ -1,0 +1,296 @@
+{
+  "package": "CherrySentinel_GUI_Pack",
+  "version": "1.0.0",
+  "files": [
+    {
+      "path": "ASSET_NOTE.txt",
+      "size": 333,
+      "sha256": "817f4414785806f34cc8c2c99e6d0d2c3c6363af0c78dd22b251d3e26525f1ec"
+    },
+    {
+      "path": "README_TH.md",
+      "size": 2101,
+      "sha256": "b5299f9aba4e8d4964bbc57cabe2c51ab5cd9da4a4bf0fa2d77375ce728050b6"
+    },
+    {
+      "path": "assets/cherry/cherry_avatar_128.png",
+      "size": 22173,
+      "sha256": "db6e5df272e95aa5d18fc454954393a2796a7972d4d1db9e15e699ee8c400c2e"
+    },
+    {
+      "path": "assets/cherry/cherry_avatar_256.png",
+      "size": 63110,
+      "sha256": "031774b19ef9d60dc0182512ccd9c25f0f7f112b3ff16af77376b1e28a380449"
+    },
+    {
+      "path": "assets/cherry/cherry_avatar_512.png",
+      "size": 68251,
+      "sha256": "9991d89e1160b0a7e35fadbab948f6c0430c19e136a0f2b959405636f914c41a"
+    },
+    {
+      "path": "assets/cherry/cherry_clean_pose.png",
+      "size": 135909,
+      "sha256": "b669d98678c06558c8ac3b09ebb48da9a5532e9ab7bb1c054c6f4cc7093a3d38"
+    },
+    {
+      "path": "assets/cherry/cherry_dashboard_pose.png",
+      "size": 205736,
+      "sha256": "4c23cf0124710899ae564281cd945db5b9e4d4b825a2d34a5ca9074396da4e92"
+    },
+    {
+      "path": "assets/cherry/cherry_full.png",
+      "size": 135909,
+      "sha256": "b669d98678c06558c8ac3b09ebb48da9a5532e9ab7bb1c054c6f4cc7093a3d38"
+    },
+    {
+      "path": "assets/cherry/cherry_half.png",
+      "size": 135909,
+      "sha256": "b669d98678c06558c8ac3b09ebb48da9a5532e9ab7bb1c054c6f4cc7093a3d38"
+    },
+    {
+      "path": "assets/cherry/cherry_logo_128.png",
+      "size": 1043,
+      "sha256": "c9c826580d3ceb0ab267ce0007b210964862ded135324314fe4ed8cad4b8780f"
+    },
+    {
+      "path": "assets/cherry/cherry_logo_256.png",
+      "size": 2272,
+      "sha256": "c2bad0e4f7be33d45df1d306faffdafedb28e39ed67c4018b4981569de97c866"
+    },
+    {
+      "path": "assets/cherry/cherry_logo_32.png",
+      "size": 266,
+      "sha256": "aa652ee36901cf131e9306dc3698fc78006db490b0199d238d474d1cf1c2a8f8"
+    },
+    {
+      "path": "assets/cherry/cherry_logo_64.png",
+      "size": 505,
+      "sha256": "b9c9ea4ba3438d7f86b7b168be727f27c2ba3082e48125fc936013c4e6235562"
+    },
+    {
+      "path": "assets/cherry/cherry_stop_pose.png",
+      "size": 284756,
+      "sha256": "910dd0237b45935df1ab7f1d380a651f7563bde08fbcd4ad97f3666f1a6d6095"
+    },
+    {
+      "path": "assets/icons/actions.svg",
+      "size": 227,
+      "sha256": "1362865ce00b5ed6e92f21b5d3530833a8cda6317f93f62a477b997cd631d2e8"
+    },
+    {
+      "path": "assets/icons/block.svg",
+      "size": 242,
+      "sha256": "5b7a90461945d0c031e53d4bdde077aebe4010b2fab3f6f46676192e170403b3"
+    },
+    {
+      "path": "assets/icons/capture.svg",
+      "size": 272,
+      "sha256": "84fa48ffa149b6273a441f6c4c577ffb320f51d26448ff5b6709f8c1d0dccc2e"
+    },
+    {
+      "path": "assets/icons/dashboard.svg",
+      "size": 353,
+      "sha256": "20b47bda232711d5d6aa0030b730f068c919e87b3538924745fc5c3de493e239"
+    },
+    {
+      "path": "assets/icons/detections.svg",
+      "size": 293,
+      "sha256": "a7f848cbed233691269c4f43d3330bfc074622c892904300b8d29320b4afdd7c"
+    },
+    {
+      "path": "assets/icons/endpoints.svg",
+      "size": 265,
+      "sha256": "35fc2dc054139c8ce6afc00ce115aa152cf8e77e4be00142e6817b3d868fe84a"
+    },
+    {
+      "path": "assets/icons/evidence.svg",
+      "size": 219,
+      "sha256": "1576ed9bfd31398c2c24d1919b30e5697bb2cad72696b38a375416aa976af2fe"
+    },
+    {
+      "path": "assets/icons/export.svg",
+      "size": 260,
+      "sha256": "bfcf022ff5454455669bf1158b670c094ccf8874a5aeb46dddac0c310369b5be"
+    },
+    {
+      "path": "assets/icons/incidents.svg",
+      "size": 308,
+      "sha256": "d94805e0b35fa0768433e1eb6f18182b6c69e8500cc1050d92f246c5b0de8ef9"
+    },
+    {
+      "path": "assets/icons/quarantine.svg",
+      "size": 268,
+      "sha256": "c62039aea7ab1e61cb4c0fe0851a6401b15920acdc8a54c40ac0fdb8d7e254ee"
+    },
+    {
+      "path": "assets/icons/rules.svg",
+      "size": 270,
+      "sha256": "43dabf4ce450e690b769dbc764adb0c4e5973aaf621933892dff1ec11baeff71"
+    },
+    {
+      "path": "assets/icons/settings.svg",
+      "size": 452,
+      "sha256": "1c587d144b2afb09ef7a0ec4e330f27046bc0c44261090e2e9c837988352aafa"
+    },
+    {
+      "path": "assets/icons/shield.svg",
+      "size": 279,
+      "sha256": "1d49bd4c446b1f0067939cae0c00a43ef43abb62aaa61f9c64daf0a672109b45"
+    },
+    {
+      "path": "assets/tokens/colors.json",
+      "size": 338,
+      "sha256": "b7ba6077f3f84d9326723428fa633b5b6451046dd20d69c19796ef7551ec5f04"
+    },
+    {
+      "path": "assets/ui-reference/dashboard_annotated.png",
+      "size": 1596965,
+      "sha256": "ab551bdcac5adfc7bb398892e3509048f90b91b3caaf2c1de8652b03e5f9d4b5"
+    },
+    {
+      "path": "assets/ui-reference/dashboard_full.png",
+      "size": 1410247,
+      "sha256": "2f9c9c22af68409c57aab244a532227d0b4f128f0b4af4fbd24a38cec5dd2f02"
+    },
+    {
+      "path": "assets/ui-reference/panels/active_incidents.png",
+      "size": 102423,
+      "sha256": "8d572b5bf8fbf1e60307a49da6121f3767a479a1668760e3afdd6bf2c4dad223"
+    },
+    {
+      "path": "assets/ui-reference/panels/analytics_widgets.png",
+      "size": 176215,
+      "sha256": "a34609e68ac336fc322c70a6d7920ddc4c5facc2278ee6732058d0728c149d0d"
+    },
+    {
+      "path": "assets/ui-reference/panels/cherry_assistant_panel.png",
+      "size": 211079,
+      "sha256": "03bfc7de22c7077627a0c4f09479c46e30fbf445617da675e9b805a23723b73e"
+    },
+    {
+      "path": "assets/ui-reference/panels/failed_login_chart.png",
+      "size": 93078,
+      "sha256": "a18874d02ec01fec36069dbfcf7bf7fae90b223d1ec4a1158bdbbf418c9304e9"
+    },
+    {
+      "path": "assets/ui-reference/panels/header_status.png",
+      "size": 50605,
+      "sha256": "201b71193e0b0eaa48c972d9a122a7d3b5c21a6313a25a351ac3856361ff0d84"
+    },
+    {
+      "path": "assets/ui-reference/panels/incident_detail.png",
+      "size": 118361,
+      "sha256": "9b26889371568ab3c7aeb85c7b279e0ce7cb0a7d94db942e0d1d5146860b5707"
+    },
+    {
+      "path": "assets/ui-reference/panels/quick_actions.png",
+      "size": 62475,
+      "sha256": "909bf16154d9db02b80c7a5d74fcdb8181d83c91b190f8873a8a783c3657f93d"
+    },
+    {
+      "path": "assets/ui-reference/panels/recent_actions.png",
+      "size": 168131,
+      "sha256": "cafcab65f53d6baa6f77bfbc148ebb9025e0641006261dc3bd58ac5b8e053481"
+    },
+    {
+      "path": "assets/ui-reference/panels/sidebar.png",
+      "size": 228665,
+      "sha256": "6be84eaef92736a436530d6213a09e1b18b6d965f6f7a1e67ffa63e9e1d69eea"
+    },
+    {
+      "path": "assets/ui-reference/panels/summary_cards.png",
+      "size": 119090,
+      "sha256": "14be37dc17fd9736924c8efd0cf19823ed5acdbad699c20da1788624d8109044"
+    },
+    {
+      "path": "assets/ui-reference/ui_breakdown.png",
+      "size": 1377770,
+      "sha256": "2d6ddc13fe190810f10e25d24884f875892cfc493edd61d355e44ee09f163383"
+    },
+    {
+      "path": "docs/COMPONENTS_TH.md",
+      "size": 1391,
+      "sha256": "33b26e621009dd07998b862b83ae0ee2bd62572a759e04a6937b9cda3505462e"
+    },
+    {
+      "path": "docs/CROP_MAP.md",
+      "size": 585,
+      "sha256": "0a1f2c89300d3d1d8e8a5221139ac24aa3aae8699d8bb9ad7c1bec2f9dfa31e7"
+    },
+    {
+      "path": "docs/INTEGRATION_WPF_TH.md",
+      "size": 1598,
+      "sha256": "3b6c3eff4398629053ad4d5b964546427eda051cdacdf892cb0c256402a711d9"
+    },
+    {
+      "path": "preview/index.html",
+      "size": 4451,
+      "sha256": "34bafe9d82e096c00b092da0ec265f109022948885ada1e52788ce671296e8fc"
+    },
+    {
+      "path": "preview/preview.png",
+      "size": 1504230,
+      "sha256": "e5c4be0d118091fe79e456477679b4b89e1e4c7aa684273aaaf87236f7dfb826"
+    },
+    {
+      "path": "preview/styles.css",
+      "size": 3934,
+      "sha256": "02bb4ed4d3dd0dfdc60024646d963d0af8504ba7b327fd7a3dc3adfde7cfdf15"
+    },
+    {
+      "path": "wpf/CherrySentinel.Gui/App.xaml",
+      "size": 436,
+      "sha256": "3f8cacd60790e77ca4638a30bf91058b5b7d3e6779bc7e395c0acc6574854ceb"
+    },
+    {
+      "path": "wpf/CherrySentinel.Gui/App.xaml.cs",
+      "size": 98,
+      "sha256": "29a982eb510f1b21b607a390dd612e63212a456961c1799b0ec1f103b79d0002"
+    },
+    {
+      "path": "wpf/CherrySentinel.Gui/Assets/cherry_avatar_256.png",
+      "size": 63110,
+      "sha256": "031774b19ef9d60dc0182512ccd9c25f0f7f112b3ff16af77376b1e28a380449"
+    },
+    {
+      "path": "wpf/CherrySentinel.Gui/Assets/cherry_full.png",
+      "size": 135909,
+      "sha256": "b669d98678c06558c8ac3b09ebb48da9a5532e9ab7bb1c054c6f4cc7093a3d38"
+    },
+    {
+      "path": "wpf/CherrySentinel.Gui/Assets/cherry_logo_64.png",
+      "size": 505,
+      "sha256": "b9c9ea4ba3438d7f86b7b168be727f27c2ba3082e48125fc936013c4e6235562"
+    },
+    {
+      "path": "wpf/CherrySentinel.Gui/CherrySentinel.Gui.csproj",
+      "size": 2381,
+      "sha256": "3ac2a0febe22aaafed8bd57a66d73ca4bae14013415cc447dd73778cbdd15a31"
+    },
+    {
+      "path": "wpf/CherrySentinel.Gui/MainWindow.xaml",
+      "size": 16426,
+      "sha256": "68ac0f244dda2fd3e48f686163bbff7286aeb1edca08b19b0dc46402861497c8"
+    },
+    {
+      "path": "wpf/CherrySentinel.Gui/MainWindow.xaml.cs",
+      "size": 2454,
+      "sha256": "aacda283f2dd915445ff183562c51020955cee662b6249894d573777d1fba6b4"
+    },
+    {
+      "path": "wpf/CherrySentinel.Gui/Properties/AssemblyInfo.cs",
+      "size": 520,
+      "sha256": "68dd369c8664c46949f6c388d1809aa3b543867d7a0b74a5846aee256d8e1637"
+    },
+    {
+      "path": "wpf/CherrySentinel.Gui/Theme.xaml",
+      "size": 3456,
+      "sha256": "519b3bc6c533272dd7cc42c96aa066c32c725b8114227de98599a49db78e539c"
+    },
+    {
+      "path": "wpf/CherrySentinel.sln",
+      "size": 910,
+      "sha256": "8ec35d0aa89a6ff4c30203f408daf27d8680cb820d16b1ccef64d18769e54f22"
+    }
+  ]
+}

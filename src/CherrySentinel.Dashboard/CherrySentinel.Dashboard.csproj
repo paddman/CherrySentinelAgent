@@ -9,7 +9,7 @@
     <AssemblyName>CherrySentinel.Dashboard</AssemblyName>
     <RootNamespace>CherrySentinel.Dashboard</RootNamespace>
     <Product>Cherry Sentinel Dashboard</Product>
-    <Description>Native Windows dashboard for Cherry Sentinel</Description>
+    <Description>Native Windows dashboard — Cherry Sentinel GUI Pack</Description>
     <Version>1.0.0</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
@@ -18,8 +18,19 @@
     <ProjectReference Include="..\CherrySentinel.Shared\CherrySentinel.Shared.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Resource Include="Assets\app-32.png" />
-    <Resource Include="Assets\app-256.png" />
+    <Resource Include="Assets\cherry_logo_32.png" />
+    <Resource Include="Assets\cherry_logo_64.png" />
+    <Resource Include="Assets\cherry_logo_128.png" />
+    <Resource Include="Assets\cherry_logo_256.png" />
+    <Resource Include="Assets\cherry_full.png" />
+    <Resource Include="Assets\cherry_avatar_256.png" />
+    <Resource Include="Assets\cherry_dashboard_pose.png" Condition="Exists('Assets\cherry_dashboard_pose.png')" />
     <Content Include="Assets\CherrySentinel.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="Theme.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
   </ItemGroup>
 </Project>

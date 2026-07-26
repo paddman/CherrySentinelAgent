@@ -1,0 +1,16 @@
+{
+  "brandBlue": "#0F68FF",
+  "brandBlue2": "#0057E8",
+  "electricBlue": "#1CC0FF",
+  "navy": "#061B3B",
+  "navy2": "#0A2A5B",
+  "background": "#F4F7FC",
+  "surface": "#FFFFFF",
+  "border": "#DCE5F2",
+  "text": "#0B1739",
+  "muted": "#6C7892",
+  "success": "#18B86B",
+  "warning": "#FF9F1A",
+  "danger": "#F04444",
+  "purple": "#6F3FF5"
+}
