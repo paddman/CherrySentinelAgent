@@ -13,6 +13,7 @@ public sealed class DetectionRuleDefinition
     public string Name { get; set; } = string.Empty;
     public bool Enabled { get; set; } = true;
     public string Severity { get; set; } = "Medium";
+    /// <summary>threshold | sequence | network | presence | process_match | event_volume</summary>
     public string Type { get; set; } = "threshold";
     public string Description { get; set; } = string.Empty;
 
@@ -23,6 +24,7 @@ public sealed class DetectionRuleDefinition
     public int MaxDistinctUsernames { get; set; }
     public int MinDistinctSources { get; set; }
     public int MinDistinctDestinations { get; set; }
+    public int MinDistinctProcessPaths { get; set; }
     public bool RequireSameSource { get; set; }
     public bool RequireSameDestination { get; set; }
     public List<string> GroupBy { get; set; } = [];
@@ -40,14 +42,21 @@ public sealed class DetectionRuleDefinition
 
     // Network rules
     public List<int> AuthPorts { get; set; } = [];
+    public List<int> DestinationPorts { get; set; } = [];
 
     /// <summary>Optional logon type filter (e.g. 3 network, 10 remote interactive).</summary>
     public List<int> LogonTypes { get; set; } = [];
 
-    /// <summary>Threat category tag for reporting (password_spray, lateral_movement, persistence, privilege_escalation).</summary>
+    /// <summary>Match if process path / raw XML contains any of these (case-insensitive).</summary>
+    public List<string> ProcessPathContains { get; set; } = [];
+
+    /// <summary>Match if raw XML / path contains any of these command-line tokens.</summary>
+    public List<string> CommandLineContains { get; set; } = [];
+
+    /// <summary>Threat category tag.</summary>
     public string Category { get; set; } = string.Empty;
 
-    /// <summary>MITRE technique id when known (e.g. T1110.003).</summary>
+    /// <summary>MITRE technique id when known.</summary>
     public string MitreTechnique { get; set; } = string.Empty;
 
     public Severity ParsedSeverity =>

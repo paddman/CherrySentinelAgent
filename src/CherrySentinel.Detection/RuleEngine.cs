@@ -129,6 +129,8 @@ public sealed class RuleEngine : IDetectionEngine
                 "sequence" => EvaluateSequence(rule, deduped, now),
                 "network" => EvaluateNetwork(rule, recentConnections, now),
                 "presence" => EvaluatePresence(rule, deduped, now),
+                "process_match" => EvaluateProcessMatch(rule, deduped, now),
+                "event_volume" => EvaluateEventVolume(rule, deduped, now),
                 _ => EvaluateThreshold(rule, deduped, now)
             };
 
@@ -162,19 +164,7 @@ public sealed class RuleEngine : IDetectionEngine
         DateTimeOffset now)
     {
         var windowStart = now.AddMinutes(-rule.WindowMinutes);
-        var scoped = events
-            .Where(e => e.TimestampUtc >= windowStart && e.TimestampUtc <= now)
-            .Where(e => rule.EventIds.Count == 0 || rule.EventIds.Contains(e.EventId))
-            .Where(e => rule.LogonTypes.Count == 0 || (e.LogonType.HasValue && rule.LogonTypes.Contains(e.LogonType.Value)))
-            .ToList();
-
-        if (rule.SuspiciousUsernames.Count > 0)
-        {
-            var set = new HashSet<string>(rule.SuspiciousUsernames, StringComparer.OrdinalIgnoreCase);
-            scoped = scoped
-                .Where(e => !string.IsNullOrWhiteSpace(e.Username) && set.Contains(e.Username!))
-                .ToList();
-        }
+        var scoped = FilterEvents(rule, events, windowStart, now);
 
         if (scoped.Count < Math.Max(1, rule.MinEventCount))
         {
@@ -187,8 +177,12 @@ public sealed class RuleEngine : IDetectionEngine
             "DISTRIBUTED_PASSWORD_SPRAY" => scoped.GroupBy(e => Norm(e.ComputerName)),
             "BRUTE_FORCE_SINGLE_ACCOUNT" => scoped.GroupBy(e => $"{Norm(e.SourceIp)}|{Norm(e.Username)}|{Norm(e.ComputerName)}"),
             "SUSPICIOUS_ACCOUNT_NAMES" => scoped.GroupBy(e => Norm(e.Username)),
-            "NETWORK_LOGON_BURST" or "RDP_LOGON_BURST" => scoped.GroupBy(e => $"{Norm(e.SourceIp)}|{Norm(e.ComputerName)}"),
-            _ => scoped.GroupBy(e => $"{Norm(e.SourceIp)}|{Norm(e.Username)}")
+            "NETWORK_LOGON_BURST" or "RDP_LOGON_BURST" or "SUCCESSFUL_LOGON_BURST" =>
+                scoped.GroupBy(e => $"{Norm(e.SourceIp)}|{Norm(e.ComputerName)}"),
+            "PROCESS_CREATION_BURST" or "FIREWALL_ALLOW_BURST" or "FIREWALL_BLOCK_BURST" =>
+                scoped.GroupBy(e => Norm(e.ComputerName)),
+            "WFP_CONNECTION_TO_AUTH_PORTS" => scoped.GroupBy(e => $"{Norm(e.SourceIp)}|{Norm(e.DestinationIp)}"),
+            _ => scoped.GroupBy(e => $"{Norm(e.SourceIp)}|{Norm(e.Username)}|{Norm(e.ProcessPath)}|{e.EventId}")
         };
 
         foreach (var g in groups)
@@ -219,17 +213,15 @@ public sealed class RuleEngine : IDetectionEngine
         DateTimeOffset now)
     {
         var windowStart = now.AddMinutes(-rule.WindowMinutes);
-        var scoped = events
-            .Where(e => e.TimestampUtc >= windowStart && e.TimestampUtc <= now)
-            .Where(e => rule.EventIds.Count == 0 || rule.EventIds.Contains(e.EventId))
-            .ToList();
+        var scoped = FilterEvents(rule, events, windowStart, now);
 
         if (scoped.Count < Math.Max(1, rule.MinEventCount))
         {
             yield break;
         }
 
-        foreach (var g in scoped.GroupBy(e => $"{e.EventId}|{Norm(e.ServiceName)}|{Norm(e.TaskName)}|{Norm(e.Username)}|{Norm(e.ComputerName)}"))
+        foreach (var g in scoped.GroupBy(e =>
+                     $"{e.EventId}|{Norm(e.ServiceName)}|{Norm(e.TaskName)}|{Norm(e.Username)}|{Norm(e.ProcessPath)}|{Norm(e.ComputerName)}"))
         {
             var list = g.ToList();
             if (list.Count < Math.Max(1, rule.MinEventCount))
@@ -239,6 +231,115 @@ public sealed class RuleEngine : IDetectionEngine
 
             yield return BuildAlert(rule, list, 0, 0, now);
         }
+    }
+
+    /// <summary>
+    /// 4688 / process-oriented matching: path keywords or command-line tokens.
+    /// </summary>
+    private IEnumerable<DetectionAlert> EvaluateProcessMatch(
+        DetectionRuleDefinition rule,
+        IReadOnlyList<SecurityEventRecord> events,
+        DateTimeOffset now)
+    {
+        var windowStart = now.AddMinutes(-rule.WindowMinutes);
+        var scoped = FilterEvents(rule, events, windowStart, now)
+            .Where(e => MatchesProcessCriteria(rule, e))
+            .ToList();
+
+        if (scoped.Count < Math.Max(1, rule.MinEventCount))
+        {
+            yield break;
+        }
+
+        foreach (var g in scoped.GroupBy(e => $"{Norm(e.ProcessPath)}|{Norm(e.ComputerName)}|{e.EventId}"))
+        {
+            var list = g.ToList();
+            if (list.Count < Math.Max(1, rule.MinEventCount))
+            {
+                continue;
+            }
+
+            yield return BuildAlert(rule, list, 0, 0, now);
+        }
+    }
+
+    /// <summary>
+    /// High-volume event IDs: alert on abnormal count per host (not every single event).
+    /// </summary>
+    private IEnumerable<DetectionAlert> EvaluateEventVolume(
+        DetectionRuleDefinition rule,
+        IReadOnlyList<SecurityEventRecord> events,
+        DateTimeOffset now)
+    {
+        var windowStart = now.AddMinutes(-rule.WindowMinutes);
+        var scoped = FilterEvents(rule, events, windowStart, now);
+        if (scoped.Count < Math.Max(1, rule.MinEventCount))
+        {
+            yield break;
+        }
+
+        foreach (var g in scoped.GroupBy(e => $"{e.EventId}|{Norm(e.ComputerName)}"))
+        {
+            var list = g.ToList();
+            if (list.Count < Math.Max(1, rule.MinEventCount))
+            {
+                continue;
+            }
+
+            var distinctPaths = list.Select(x => Norm(x.ProcessPath)).Where(x => x != "-")
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            if (rule.MinDistinctProcessPaths > 0 && distinctPaths < rule.MinDistinctProcessPaths)
+            {
+                continue;
+            }
+
+            yield return BuildAlert(rule, list, 0, 0, now);
+        }
+    }
+
+    private static List<SecurityEventRecord> FilterEvents(
+        DetectionRuleDefinition rule,
+        IReadOnlyList<SecurityEventRecord> events,
+        DateTimeOffset windowStart,
+        DateTimeOffset now)
+    {
+        var scoped = events
+            .Where(e => e.TimestampUtc >= windowStart && e.TimestampUtc <= now)
+            .Where(e => rule.EventIds.Count == 0 || rule.EventIds.Contains(e.EventId))
+            .Where(e => rule.LogonTypes.Count == 0 || (e.LogonType.HasValue && rule.LogonTypes.Contains(e.LogonType.Value)))
+            .Where(e => rule.DestinationPorts.Count == 0 ||
+                        (e.DestinationPort.HasValue && rule.DestinationPorts.Contains(e.DestinationPort.Value)))
+            .ToList();
+
+        if (rule.SuspiciousUsernames.Count > 0)
+        {
+            var set = new HashSet<string>(rule.SuspiciousUsernames, StringComparer.OrdinalIgnoreCase);
+            scoped = scoped
+                .Where(e =>
+                {
+                    var u = e.Username ?? e.TargetUserName;
+                    return !string.IsNullOrWhiteSpace(u) && set.Contains(u!);
+                })
+                .ToList();
+        }
+
+        return scoped;
+    }
+
+    private static bool MatchesProcessCriteria(DetectionRuleDefinition rule, SecurityEventRecord e)
+    {
+        var haystack = $"{e.ProcessPath}\n{e.RawXml}\n{e.ServiceName}\n{e.TaskName}";
+        if (rule.ProcessPathContains.Count == 0 && rule.CommandLineContains.Count == 0)
+        {
+            return true;
+        }
+
+        // OR within each list; AND between path list and cmdline list when both specified.
+        var pathOk = rule.ProcessPathContains.Count == 0 ||
+                     rule.ProcessPathContains.Any(p => haystack.Contains(p, StringComparison.OrdinalIgnoreCase));
+        var cmdOk = rule.CommandLineContains.Count == 0 ||
+                    rule.CommandLineContains.Any(p => haystack.Contains(p, StringComparison.OrdinalIgnoreCase));
+        return pathOk && cmdOk;
     }
 
     private IEnumerable<DetectionAlert> EvaluateSequence(

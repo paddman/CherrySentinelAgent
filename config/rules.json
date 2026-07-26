@@ -93,32 +93,32 @@
       "description": "Suspicious account names with sufficient volume (name alone does not alert)."
     },
     {
-      "id": "MULTIPLE_INTERNAL_TARGETS",
-      "name": "Multiple Internal Targets",
+      "id": "SUCCESSFUL_LOGON_BURST",
+      "name": "Successful Logon Burst (4624)",
       "enabled": true,
-      "severity": "High",
-      "category": "lateral_movement",
-      "mitreTechnique": "T1021",
-      "type": "network",
-      "windowMinutes": 10,
-      "minDistinctDestinations": 5,
-      "authPorts": [22, 23, 80, 135, 139, 443, 445, 1433, 3306, 3389, 5985, 5986],
+      "severity": "Medium",
+      "category": "credential_access",
+      "mitreTechnique": "T1078",
+      "type": "event_volume",
+      "eventIds": [4624],
+      "windowMinutes": 5,
+      "minEventCount": 30,
       "cooldownMinutes": 15,
-      "description": "One source connecting to many destinations on authentication-related ports (possible pivot/scan)."
+      "description": "Abnormally high volume of successful logons (4624) on one host."
     },
     {
-      "id": "EXPLICIT_CREDENTIALS_LATERAL",
-      "name": "Explicit Credentials Lateral Use",
+      "id": "FAILED_LOGON_VOLUME",
+      "name": "Failed Logon Volume (4625)",
       "enabled": true,
-      "severity": "High",
-      "category": "lateral_movement",
-      "mitreTechnique": "T1021",
-      "type": "presence",
-      "eventIds": [4648],
-      "windowMinutes": 15,
-      "minEventCount": 3,
-      "cooldownMinutes": 20,
-      "description": "Repeated explicit credential logons (4648) often used for lateral movement (runas / remote tools)."
+      "severity": "Medium",
+      "category": "credential_access",
+      "mitreTechnique": "T1110",
+      "type": "event_volume",
+      "eventIds": [4625],
+      "windowMinutes": 5,
+      "minEventCount": 40,
+      "cooldownMinutes": 10,
+      "description": "High volume of failed logons even if spray thresholds not fully met."
     },
     {
       "id": "NETWORK_LOGON_BURST",
@@ -131,9 +131,8 @@
       "logonTypes": [3],
       "windowMinutes": 10,
       "minEventCount": 15,
-      "minDistinctSources": 1,
       "cooldownMinutes": 20,
-      "description": "Burst of successful network logons (type 3) — possible SMB/WinRM lateral activity."
+      "description": "Burst of successful network logons (type 3)."
     },
     {
       "id": "RDP_LOGON_BURST",
@@ -147,7 +146,151 @@
       "windowMinutes": 10,
       "minEventCount": 10,
       "cooldownMinutes": 15,
-      "description": "Burst of RDP-related logons (type 10/7) from same source."
+      "description": "Burst of RDP-related logons (type 10/7)."
+    },
+    {
+      "id": "EXPLICIT_CREDENTIALS_LATERAL",
+      "name": "Explicit Credentials Lateral Use",
+      "enabled": true,
+      "severity": "High",
+      "category": "lateral_movement",
+      "mitreTechnique": "T1021",
+      "type": "presence",
+      "eventIds": [4648],
+      "windowMinutes": 15,
+      "minEventCount": 3,
+      "cooldownMinutes": 20,
+      "description": "Repeated explicit credential use (4648)."
+    },
+    {
+      "id": "EXPLICIT_CREDENTIALS_SINGLE",
+      "name": "Explicit Credentials Observed (4648)",
+      "enabled": true,
+      "severity": "Low",
+      "category": "lateral_movement",
+      "mitreTechnique": "T1021",
+      "type": "presence",
+      "eventIds": [4648],
+      "windowMinutes": 60,
+      "minEventCount": 1,
+      "cooldownMinutes": 30,
+      "description": "Any 4648 explicit credentials event (notable; may be noisy — tune allowlist)."
+    },
+    {
+      "id": "SPECIAL_PRIVILEGES_ASSIGNED",
+      "name": "Special Privileges Assigned (4672)",
+      "enabled": true,
+      "severity": "Low",
+      "category": "privilege_escalation",
+      "mitreTechnique": "T1078",
+      "type": "presence",
+      "eventIds": [4672],
+      "windowMinutes": 30,
+      "minEventCount": 1,
+      "cooldownMinutes": 20,
+      "description": "4672 special privileges assigned to new logon (often admin). Informational unless chained."
+    },
+    {
+      "id": "PROCESS_CREATION_BURST",
+      "name": "Process Creation Burst (4688)",
+      "enabled": true,
+      "severity": "Medium",
+      "category": "execution",
+      "mitreTechnique": "T1059",
+      "type": "event_volume",
+      "eventIds": [4688],
+      "windowMinutes": 5,
+      "minEventCount": 80,
+      "minDistinctProcessPaths": 10,
+      "cooldownMinutes": 15,
+      "description": "Abnormally high process creation rate (4688) with many distinct paths."
+    },
+    {
+      "id": "PROCESS_FROM_TEMP_PATH",
+      "name": "Process From Temp/Public Path (4688)",
+      "enabled": true,
+      "severity": "High",
+      "category": "execution",
+      "mitreTechnique": "T1204",
+      "type": "process_match",
+      "eventIds": [4688],
+      "windowMinutes": 30,
+      "minEventCount": 1,
+      "processPathContains": [
+        "\\Temp\\",
+        "\\tmp\\",
+        "\\Users\\Public\\",
+        "\\AppData\\Local\\Temp\\",
+        "\\AppData\\Roaming\\",
+        "\\Downloads\\",
+        "\\Perflogs\\",
+        "\\$Recycle.Bin\\"
+      ],
+      "cooldownMinutes": 20,
+      "description": "Process created from temporary or world-writable path."
+    },
+    {
+      "id": "LOLBINS_PROCESS_CREATION",
+      "name": "LOLBins Process Creation (4688)",
+      "enabled": true,
+      "severity": "High",
+      "category": "execution",
+      "mitreTechnique": "T1218",
+      "type": "process_match",
+      "eventIds": [4688],
+      "windowMinutes": 30,
+      "minEventCount": 1,
+      "processPathContains": [
+        "\\powershell.exe",
+        "\\pwsh.exe",
+        "\\cmd.exe",
+        "\\wscript.exe",
+        "\\cscript.exe",
+        "\\mshta.exe",
+        "\\certutil.exe",
+        "\\bitsadmin.exe",
+        "\\rundll32.exe",
+        "\\regsvr32.exe",
+        "\\wmic.exe",
+        "\\msiexec.exe",
+        "\\installutil.exe",
+        "\\cmstp.exe",
+        "\\hh.exe"
+      ],
+      "cooldownMinutes": 15,
+      "description": "Living-off-the-land binary process creation (may need allowlist for admin tools)."
+    },
+    {
+      "id": "SUSPICIOUS_CMDLINE_TOKENS",
+      "name": "Suspicious Command Line Tokens (4688)",
+      "enabled": true,
+      "severity": "Critical",
+      "category": "execution",
+      "mitreTechnique": "T1059",
+      "type": "process_match",
+      "eventIds": [4688],
+      "windowMinutes": 60,
+      "minEventCount": 1,
+      "commandLineContains": [
+        " -enc ",
+        " -EncodedCommand",
+        "FromBase64String",
+        "IEX(",
+        "Invoke-Expression",
+        "DownloadString",
+        "DownloadFile",
+        "Invoke-WebRequest",
+        "bypass",
+        "Hidden",
+        " -nop ",
+        " -w hidden",
+        "reg add",
+        "schtasks /create",
+        "net user ",
+        "net localgroup administrators"
+      ],
+      "cooldownMinutes": 10,
+      "description": "Command line contains common attack tokens (requires command-line auditing)."
     },
     {
       "id": "NEW_SERVICE_INSTALLED",
@@ -161,7 +304,7 @@
       "windowMinutes": 30,
       "minEventCount": 1,
       "cooldownMinutes": 30,
-      "description": "New Windows service installation (4697/7045) — persistence or malware drop."
+      "description": "New Windows service (4697/7045)."
     },
     {
       "id": "SCHEDULED_TASK_CREATED",
@@ -175,7 +318,7 @@
       "windowMinutes": 30,
       "minEventCount": 1,
       "cooldownMinutes": 30,
-      "description": "New scheduled task (4698) — persistence / lateral execution."
+      "description": "Scheduled task created (4698)."
     },
     {
       "id": "ACCOUNT_CREATED",
@@ -189,7 +332,7 @@
       "windowMinutes": 60,
       "minEventCount": 1,
       "cooldownMinutes": 30,
-      "description": "Local user account created (4720)."
+      "description": "User account created (4720)."
     },
     {
       "id": "PRIVILEGED_GROUP_CHANGE",
@@ -203,7 +346,64 @@
       "windowMinutes": 60,
       "minEventCount": 1,
       "cooldownMinutes": 15,
-      "description": "User added to privileged/local group (4728/4732)."
+      "description": "User added to global/local security group (4728/4732)."
+    },
+    {
+      "id": "WFP_CONNECTION_ALLOWED",
+      "name": "WFP Connection Allowed Burst (5156)",
+      "enabled": true,
+      "severity": "Low",
+      "category": "network",
+      "mitreTechnique": "T1046",
+      "type": "event_volume",
+      "eventIds": [5156],
+      "windowMinutes": 5,
+      "minEventCount": 100,
+      "cooldownMinutes": 20,
+      "description": "High volume of Filtering Platform allowed connections (5156)."
+    },
+    {
+      "id": "WFP_CONNECTION_BLOCKED",
+      "name": "WFP Connection Blocked Burst (5157)",
+      "enabled": true,
+      "severity": "Medium",
+      "category": "network",
+      "mitreTechnique": "T1046",
+      "type": "event_volume",
+      "eventIds": [5157],
+      "windowMinutes": 5,
+      "minEventCount": 30,
+      "cooldownMinutes": 15,
+      "description": "High volume of Filtering Platform blocked connections (5157) — possible scan/probe."
+    },
+    {
+      "id": "WFP_CONNECTION_TO_AUTH_PORTS",
+      "name": "WFP Allowed to Auth Ports (5156)",
+      "enabled": true,
+      "severity": "Medium",
+      "category": "lateral_movement",
+      "mitreTechnique": "T1021",
+      "type": "threshold",
+      "eventIds": [5156],
+      "destinationPorts": [22, 23, 135, 139, 445, 1433, 3306, 3389, 5985, 5986],
+      "windowMinutes": 10,
+      "minEventCount": 15,
+      "cooldownMinutes": 15,
+      "description": "Many WFP-allowed connections toward authentication/admin ports."
+    },
+    {
+      "id": "MULTIPLE_INTERNAL_TARGETS",
+      "name": "Multiple Internal Targets",
+      "enabled": true,
+      "severity": "High",
+      "category": "lateral_movement",
+      "mitreTechnique": "T1021",
+      "type": "network",
+      "windowMinutes": 10,
+      "minDistinctDestinations": 5,
+      "authPorts": [22, 23, 80, 135, 139, 443, 445, 1433, 3306, 3389, 5985, 5986],
+      "cooldownMinutes": 15,
+      "description": "One host connecting to many destinations on auth-related ports."
     },
     {
       "id": "LATERAL_AUTH_PORT_SCAN",
@@ -217,7 +417,20 @@
       "minDistinctDestinations": 8,
       "authPorts": [22, 23, 135, 139, 445, 1433, 3306, 3389, 5985, 5986],
       "cooldownMinutes": 15,
-      "description": "Rapid fan-out to many hosts on admin/auth ports from one process (prep for lateral movement)."
+      "description": "Rapid fan-out to many hosts on admin/auth ports."
+    },
+    {
+      "id": "ALL_COLLECTED_EVENTS_DIGEST",
+      "name": "Collected Events Activity Digest",
+      "enabled": true,
+      "severity": "Informational",
+      "category": "telemetry",
+      "type": "event_volume",
+      "eventIds": [4624, 4625, 4648, 4672, 4688, 4697, 4698, 4720, 4728, 4732, 5156, 5157, 7045],
+      "windowMinutes": 15,
+      "minEventCount": 200,
+      "cooldownMinutes": 30,
+      "description": "Host generated high combined volume across all monitored event IDs (telemetry/anomaly baseline)."
     }
   ]
 }
