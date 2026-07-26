@@ -57,12 +57,25 @@ VersionInfoDescription=Cherry Sentinel Agent Setup
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
-WelcomeLabel1=Welcome to Cherry Sentinel Agent Setup
-WelcomeLabel2=This will install Cherry Sentinel Agent (Windows Service) and Dashboard on your computer.%n%nSecure endpoint monitoring — detect password spray, lateral movement, and abnormal process activity.%n%nIt is recommended that you close all other applications before continuing.
-FinishedHeadingLabel=Completing Cherry Sentinel Agent Setup
-FinishedLabelNoIcons=Setup has finished installing Cherry Sentinel Agent on your computer.
-FinishedLabel=Setup has finished installing Cherry Sentinel Agent on your computer. The application may be launched by selecting the installed shortcuts.
-ClickFinish=Click Finish to exit Setup.
+; Text aligned with c300a2ba install storyboard (TH + EN)
+WelcomeLabel1=Cherry Sentinel Agent Setup
+WelcomeLabel2=ยินดีต้อนรับสู่ตัวช่วยติดตั้ง Cherry Sentinel Agent%n%nสำหรับปกป้องระบบของคุณตลอด 24 ชั่วโมง — ตรวจจับ password spray, lateral movement และ process ผิดปกติ%n%nThis will install the Agent (Windows Service) and Desktop Dashboard.%n%nแนะนำให้ปิดโปรแกรมอื่นก่อนดำเนินการต่อ
+FinishedHeadingLabel=ติดตั้งสำเร็จ
+FinishedLabelNoIcons=Cherry Sentinel Agent ติดตั้งเรียบร้อยแล้ว!
+FinishedLabel=Cherry Sentinel Agent ติดตั้งเรียบร้อยแล้ว!%n%nพร้อมทำงานบนจุดตรวจ และเชื่อมต่อศูนย์กลางได้%n%nเปิด Dashboard ได้จากเมนู Start / Desktop
+ClickFinish=คลิก Finish เพื่อเริ่มใช้งาน
+ButtonNext=Next >
+ButtonBack=< Back
+ButtonCancel=Cancel
+ButtonFinish=Finish
+SelectDirLabel3=เลือกตำแหน่งติดตั้ง (โฟลเดอร์ปลายทาง)
+SelectComponentsLabel2=เลือกประเภทการติดตั้ง / components
+WizardSelectDir=เลือกตำแหน่งติดตั้ง
+WizardSelectComponents=เลือกประเภทการติดตั้ง
+WizardReady=พร้อมติดตั้ง
+WizardInstalling=กำลังติดตั้ง...
+WizardFinished=เสร็จสิ้น
+StatusExtractFiles=กำลังติดตั้งไฟล์...
 
 [Types]
 Name: "full"; Description: "Full installation (Agent + Dashboard)"
