@@ -1,10 +1,38 @@
 # Cherry Sentinel Agent
 
-Endpoint Security Monitoring Agent for **Windows Server 2012, 2012 R2, 2016, 2019, 2022, and 2025**.
+Endpoint Security Monitoring Agent for **Windows Server 2012, 2012 R2, 2016, 2019, 2022, and 2025** (+ Linux agent client).
 
 Detects password spray, brute force, lateral movement, and abnormal process/service activity — and attributes **which host, process, and Windows service** connected to **which IP:port**.
 
 Default posture: **detect-only** (no automatic block/kill).
+
+## Download installers (GitHub Releases)
+
+**Latest release:** [v1.0.11](https://github.com/paddman/CherrySentinelAgent/releases/tag/v1.0.11)
+
+| File | Platform | Description |
+|------|----------|-------------|
+| [CherrySentinel-Setup-1.0.11.exe](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.11/CherrySentinel-Setup-1.0.11.exe) | Windows | **Full stack** — Central + Agent + Dashboard (~133 MB) |
+| [CherrySentinel-Agent-Setup-1.0.14.exe](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.11/CherrySentinel-Agent-Setup-1.0.14.exe) | Windows | **Agent only** + tray / Edit Central IP (~58 MB) |
+| [CherrySentinel-Central-Setup-1.0.4.exe](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.11/CherrySentinel-Central-Setup-1.0.4.exe) | Windows | **Central only** (~13 MB) |
+| [CherrySentinel-Linux-Agent-1.0.11-linux-x64.tar.gz](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.11/CherrySentinel-Linux-Agent-1.0.11-linux-x64.tar.gz) | Linux x64 | **Linux agent client** + install scripts (~31 MB) |
+
+Self-contained — **no separate .NET install** on target machines.
+
+### Quick install
+
+**Windows server (all-in-one):** run Full Setup as Admin → type **Full stack** → Dashboard `https://localhost:7443`
+
+**Windows endpoint:** run Agent Setup → set Central **IP** + port **7443**
+
+**Linux:**
+```bash
+tar -xzf CherrySentinel-Linux-Agent-1.0.11-linux-x64.tar.gz
+cd CherrySentinel-Linux-Agent-1.0.11-linux-x64
+sudo ./install-agent.sh --host <CENTRAL_IP> --port 7443
+```
+
+All releases: https://github.com/paddman/CherrySentinelAgent/releases
 
 ## Architecture
 
