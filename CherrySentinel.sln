@@ -35,6 +35,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CherrySentinel.Dashboard", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CherrySentinel.Agent.Tray", "src\CherrySentinel.Agent.Tray\CherrySentinel.Agent.Tray.csproj", "{FB5C067D-E3D9-4CDD-8DFA-966E0555DB87}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CherrySentinel.Agent.Linux", "src\CherrySentinel.Agent.Linux\CherrySentinel.Agent.Linux.csproj", "{704E56E4-0055-4664-BC69-12904D053049}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -213,6 +215,18 @@ Global
 		{FB5C067D-E3D9-4CDD-8DFA-966E0555DB87}.Release|x64.Build.0 = Release|Any CPU
 		{FB5C067D-E3D9-4CDD-8DFA-966E0555DB87}.Release|x86.ActiveCfg = Release|Any CPU
 		{FB5C067D-E3D9-4CDD-8DFA-966E0555DB87}.Release|x86.Build.0 = Release|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Debug|x64.Build.0 = Debug|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Debug|x86.Build.0 = Debug|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Release|Any CPU.Build.0 = Release|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Release|x64.ActiveCfg = Release|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Release|x64.Build.0 = Release|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Release|x86.ActiveCfg = Release|Any CPU
+		{704E56E4-0055-4664-BC69-12904D053049}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -232,5 +246,6 @@ Global
 		{803E726C-6D47-495B-BBC4-E2EFA054145C} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{97D9A50F-8564-403F-BDEA-264FA898608B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{FB5C067D-E3D9-4CDD-8DFA-966E0555DB87} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{704E56E4-0055-4664-BC69-12904D053049} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal
