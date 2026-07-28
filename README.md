@@ -1,6 +1,8 @@
 # Cherry Sentinel
 
- https://www.beezachat.com/api/uploads/media/images/g47jgkglhtabnqmcdpr9tyqzy.png
+https://www.beezachat.com/api/uploads/media/images/g47jgkglhtabnqmcdpr9tyqzy.png
+
+ 
 **Server-first endpoint security** — multi-agent fleet, Central API, native Dashboard.  
 Windows Server **2012 → 2025** · Linux agent client · self-contained installers (no separate .NET).
 
