@@ -64,6 +64,49 @@
       "keywords": ["iis", "apache", "nginx", "w3wp"]
     },
     {
+      "id": "OS-IIS-W3WP",
+      "name": "IIS worker / ASP.NET fault indicators",
+      "enabled": true,
+      "severity": "High",
+      "category": "execution",
+      "mitreTechnique": "T1505.003",
+      "source": "community",
+      "matchAny": [
+        "w3wp.exe",
+        "ASP.NET",
+        "HttpException",
+        "Request timed out",
+        "potential dangerous",
+        "ViewState",
+        "web.config",
+        "inetpub",
+        "Application Pool"
+      ],
+      "matchAll": [],
+      "keywords": ["IIS", "W3SVC", "WAS", "ASP.NET"]
+    },
+    {
+      "id": "OS-IIS-AUTH",
+      "name": "IIS / HTTP auth failures",
+      "enabled": true,
+      "severity": "Medium",
+      "category": "credential_access",
+      "mitreTechnique": "T1110",
+      "source": "community",
+      "matchAny": [
+        "401.1",
+        "401.2",
+        "401.3",
+        "Logon failed",
+        "authentication failed",
+        "Unauthorized",
+        "sc-status 401",
+        "sc-status 403"
+      ],
+      "matchAll": [],
+      "keywords": ["IIS", "http", "W3SVC"]
+    },
+    {
       "id": "OS-MIMIKATZ",
       "name": "Credential dumping tool indicators",
       "enabled": true,

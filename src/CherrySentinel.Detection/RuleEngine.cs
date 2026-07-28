@@ -390,6 +390,13 @@ public sealed class RuleEngine : IDetectionEngine
             .Where(c => c.TimestampUtc >= windowStart && c.TimestampUtc <= now && c.IsNew)
             .Where(c => !string.IsNullOrWhiteSpace(c.RemoteAddress) && c.RemoteAddress is not "0.0.0.0" and not "127.0.0.1")
             .Where(c => ports is null || ports.Contains(c.RemotePort))
+            .Where(c =>
+            {
+                // Optional process filter (e.g. IIS w3wp.exe outbound)
+                if (rule.ProcessPathContains.Count == 0) return true;
+                var hay = $"{c.ProcessName}\n{c.ProcessPath}\n{c.ServiceNames}";
+                return rule.ProcessPathContains.Any(p => hay.Contains(p, StringComparison.OrdinalIgnoreCase));
+            })
             .ToList();
 
         foreach (var g in scoped.GroupBy(c => c.ComputerName))

@@ -53,27 +53,39 @@ public sealed class WindowsEventLogCollector : IEventLogCollector
                 continue;
             }
 
-            // Catch up any events written while the service was stopped (bookmark by EventRecordID).
-            await CatchUpAsync(channel, cancellationToken);
-
-            var query = BuildQuery(channel);
-            var eventQuery = new EventLogQuery(channel.LogName, PathType.LogName, query)
+            try
             {
-                ReverseDirection = false
-            };
+                // Catch up any events written while the service was stopped (bookmark by EventRecordID).
+                await CatchUpAsync(channel, cancellationToken);
 
-            var watcher = new EventLogWatcher(eventQuery);
-            watcher.EventRecordWritten += OnEventRecordWritten;
-            watcher.Enabled = true;
-            lock (_sync)
-            {
-                _watchers.Add(watcher);
+                var query = BuildQuery(channel);
+                var eventQuery = new EventLogQuery(channel.LogName, PathType.LogName, query)
+                {
+                    ReverseDirection = false
+                };
+
+                var watcher = new EventLogWatcher(eventQuery);
+                watcher.EventRecordWritten += OnEventRecordWritten;
+                watcher.Enabled = true;
+                lock (_sync)
+                {
+                    _watchers.Add(watcher);
+                }
+
+                _logger.LogInformation(
+                    "EventLogWatcher started for {Log} ids={Ids}",
+                    channel.LogName,
+                    string.Join(',', channel.EventIds));
             }
-
-            _logger.LogInformation(
-                "EventLogWatcher started for {Log} ids={Ids}",
-                channel.LogName,
-                string.Join(',', channel.EventIds));
+            catch (EventLogNotFoundException ex)
+            {
+                // IIS channels missing when IIS not installed — skip quietly
+                _logger.LogInformation(ex, "Event log channel not present (skipped): {Log}", channel.LogName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to start EventLogWatcher for {Log} (skipped)", channel.LogName);
+            }
         }
     }
 
@@ -222,6 +234,10 @@ public sealed class WindowsEventLogCollector : IEventLogCollector
         result.ProcessPath = First(data, "ProcessName", "NewProcessName", "ImagePath", "ServiceFileName");
         result.ServiceName = First(data, "ServiceName");
         result.TaskName = First(data, "TaskName");
+        // Keep parent path in raw XML; also stamp parent onto ServiceName if empty for IIS w3wp parent matching
+        var parent = First(data, "ParentProcessName", "CreatorProcessName");
+        if (!string.IsNullOrWhiteSpace(parent) && string.IsNullOrWhiteSpace(result.ServiceName))
+            result.ServiceName = "Parent=" + parent;
 
         if (int.TryParse(First(data, "IpPort", "SourcePort"), out var sport))
             result.SourcePort = sport;

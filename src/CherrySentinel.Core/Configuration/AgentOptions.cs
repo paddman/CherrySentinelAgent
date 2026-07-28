@@ -88,7 +88,31 @@ public sealed class EventLogCollectorOptions
         new()
         {
             LogName = "System",
-            EventIds = [7045]
+            // 7045=new service; 7031/7034=service crash/terminated (IIS W3SVC/WAS noise is useful)
+            EventIds = [7045, 7031, 7034]
+        },
+        new()
+        {
+            // ASP.NET / IIS errors (Application log)
+            LogName = "Application",
+            EventIds =
+            [
+                1000, 1001, 1002,           // app crash / hang
+                1309, 1310, 1325,           // ASP.NET unhandled / health
+                2276, 2280, 2303, 2304,     // IIS module / WP issues (when logged to Application)
+                5002, 5009, 5010, 5011, 5012, 5013 // WAS worker process failures
+            ]
+        },
+        new()
+        {
+            // IIS configuration changes (if channel exists on host)
+            LogName = "Microsoft-Windows-IIS-Configuration/Operational",
+            EventIds = [29, 30, 40, 41, 50, 51, 52]
+        },
+        new()
+        {
+            LogName = "Microsoft-Windows-WAS/Operational",
+            EventIds = [5002, 5009, 5010, 5011, 5012, 5013, 5186]
         }
     ];
 }
