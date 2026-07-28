@@ -1,5 +1,6 @@
 [Unit]
 Description=Cherry Sentinel Linux Agent
+Documentation=https://github.com/paddman/CherrySentinelAgent
 After=network-online.target
 Wants=network-online.target
 
@@ -7,9 +8,14 @@ Wants=network-online.target
 Type=notify
 ExecStart=/opt/cherrysentinel/agent/CherrySentinel.Agent.Linux
 WorkingDirectory=/opt/cherrysentinel/agent
-Restart=always
+Restart=on-failure
 RestartSec=5
+TimeoutStartSec=30
+# Optional: Environment=CHERRY_Server__Url=https://10.0.0.5:7443
 Environment=DOTNET_ENVIRONMENT=Production
+# Allow writing logs if appsettings cannot update
+ReadWritePaths=/opt/cherrysentinel /var/log/cherrysentinel
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
