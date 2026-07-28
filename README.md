@@ -1,4 +1,5 @@
 # Cherry Sentinel
+![Uploading image.png…]()
 
 **Server-first endpoint security** — multi-agent fleet, Central API, native Dashboard.  
 Windows Server **2012 → 2025** · Linux agent client · self-contained installers (no separate .NET).
