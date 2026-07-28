@@ -19,6 +19,18 @@ if (-not (Test-Path $exe)) {
 
 New-Item -ItemType Directory -Force -Path $DataDir, $LogDir, (Join-Path $DataDir "evidence") | Out-Null
 
+# Force-stop old service + kill leftover processes (safe for in-place upgrade)
+$ErrorActionPreference = "SilentlyContinue"
+& sc.exe stop $ServiceName | Out-Null
+Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 800
+foreach ($n in @("CherrySentinel.Agent", "CherrySentinel.Agent.Tray")) {
+    Get-Process -Name $n -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    & taskkill.exe /F /IM "$n.exe" /T 2>$null | Out-Null
+}
+Start-Sleep -Milliseconds 500
+$ErrorActionPreference = "Stop"
+
 # Patch appsettings if present
 $appsettings = Join-Path $InstallDir "appsettings.json"
 if (Test-Path $appsettings) {
@@ -42,7 +54,7 @@ if (Test-Path $appsettings) {
     }
 }
 
-# Event source (Application log only — never clear Security log)
+# Event source (Application log only - never clear Security log)
 $source = "CherrySentinelAgent"
 if (-not [System.Diagnostics.EventLog]::SourceExists($source)) {
     try { New-EventLog -LogName Application -Source $source } catch { }

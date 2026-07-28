@@ -72,6 +72,9 @@ builder.Services.PostConfigure<AgentOptions>(opts =>
         opts.ComputerName = Environment.MachineName;
     }
 
+    // Always report assembly product version (not stale appsettings 1.0.0)
+    opts.Version = CherrySentinel.Shared.ProductInfo.GetVersion();
+
     AgentIdentity.EnsureAgentId(opts);
     Directory.CreateDirectory(opts.DataDirectory);
 });
@@ -97,6 +100,7 @@ builder.Services.AddSingleton<FirewallBlocker>();
 builder.Services.AddSingleton<IEvidenceCollector, EvidencePackager>();
 builder.Services.AddSingleton<IResponseExecutor, LocalResponseExecutor>();
 builder.Services.AddSingleton<ITransportClient, HttpsTransportClient>();
+builder.Services.AddSingleton<CherrySentinel.Transport.SyslogForwarder>();
 builder.Services.AddHostedService<AgentWorker>();
 
 try

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using CherrySentinel.Server.Data;
 using CherrySentinel.Shared.Enums;
 using CherrySentinel.Shared.Models;
@@ -16,18 +17,49 @@ public sealed class LateralMovementTracker
 {
     private readonly CorrelationOptions _options;
     private readonly ILogger<LateralMovementTracker> _logger;
+    private readonly ICentralStore _store;
     private readonly ConcurrentDictionary<string, ThreatCampaign> _campaigns = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, List<string>> _ipToCampaigns = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private int _loaded;
 
-    public LateralMovementTracker(IOptions<CorrelationOptions> options, ILogger<LateralMovementTracker> logger)
+    public LateralMovementTracker(
+        IOptions<CorrelationOptions> options,
+        ILogger<LateralMovementTracker> logger,
+        ICentralStore store)
     {
         _options = options.Value;
         _logger = logger;
+        _store = store;
+    }
+
+    public async Task LoadAsync()
+    {
+        if (Interlocked.Exchange(ref _loaded, 1) == 1) return;
+        try
+        {
+            var rows = await _store.ListCampaignJsonAsync(200);
+            foreach (var (_, json) in rows)
+            {
+                var c = JsonSerializer.Deserialize<ThreatCampaign>(json, JsonOptions);
+                if (c is null || string.IsNullOrWhiteSpace(c.CampaignId)) continue;
+                _campaigns[c.CampaignId] = c;
+                foreach (var ip in c.InvolvedIps)
+                    IndexIp(ip, c.CampaignId);
+            }
+
+            _logger.LogInformation("Loaded {Count} threat campaigns from durable store", _campaigns.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not load durable threat campaigns");
+        }
     }
 
     public IReadOnlyList<ThreatCampaign> IngestIncidents(IEnumerable<Incident> incidents)
     {
+        _ = LoadAsync(); // fire-and-forget ensure load
         var updated = new List<ThreatCampaign>();
         foreach (var incident in incidents)
         {
@@ -35,6 +67,7 @@ public sealed class LateralMovementTracker
             if (campaign is not null)
             {
                 updated.Add(campaign);
+                Persist(campaign);
             }
         }
 
@@ -45,6 +78,19 @@ public sealed class LateralMovementTracker
             .Select(g => g.Last())
             .OrderByDescending(c => c.LastSeenUtc)
             .ToList();
+    }
+
+    private void Persist(ThreatCampaign campaign)
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(campaign, JsonOptions);
+            _ = _store.UpsertCampaignJsonAsync(campaign.CampaignId, json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to persist campaign {Id}", campaign.CampaignId);
+        }
     }
 
     public IReadOnlyList<ThreatCampaign> ListCampaigns(int take = 100) =>

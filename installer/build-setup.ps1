@@ -1,17 +1,18 @@
 #Requires -Version 3.0
 <#
 .SYNOPSIS
-  Publish Agent + Dashboard and build CherrySentinel-Setup-x.y.z.exe (Inno Setup).
+  Publish Central + Agent + Dashboard and build full CherrySentinel-Setup-x.y.z.exe
 
 .EXAMPLE
   .\installer\build-setup.ps1
+  .\installer\build-setup.ps1 -Version 1.0.7
   .\installer\build-setup.ps1 -SkipPublish
 #>
 [CmdletBinding()]
 param(
     [switch]$SkipPublish,
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.10"
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,41 +51,84 @@ if (-not (Test-Path $ico)) {
 
 if (-not $SkipPublish) {
     Write-Host ""
-    Write-Host "[1/3] Publishing Agent (self-contained win-x64)..." -ForegroundColor Yellow
-    New-Item -ItemType Directory -Force -Path (Join-Path $Root "artifacts\agent-win-x64") | Out-Null
+    # All components are self-contained win-x64 — target PCs need NO installed .NET
+    Write-Host "[1/4] Publishing Central Server (self-contained win-x64)..." -ForegroundColor Yellow
+    $serverOut = Join-Path $Root "artifacts\server-win-x64"
+    $tmp = Join-Path $Root "artifacts\server-publish-tmp"
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    # Clean old framework-dependent leftovers so installer does not ship mixed builds
+    if (Test-Path $serverOut) {
+        Get-ChildItem $serverOut -Force | Where-Object { $_.Name -ne 'logs' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $tmp, $serverOut | Out-Null
+    dotnet publish (Join-Path $Root "src\CherrySentinel.Server\CherrySentinel.Server.csproj") `
+        -c $Configuration -r win-x64 --self-contained true `
+        -p:PublishSingleFile=false `
+        -o $tmp
+    if ($LASTEXITCODE -ne 0) { throw "Central publish failed" }
+    Copy-Item (Join-Path $tmp "*") $serverOut -Recurse -Force
+    New-Item -ItemType Directory -Force -Path (Join-Path $serverOut "signatures") | Out-Null
+    Copy-Item (Join-Path $Root "config\signatures\opensource-signatures.json") (Join-Path $serverOut "signatures\") -Force -ErrorAction SilentlyContinue
+    Copy-Item $ico $serverOut -Force -ErrorAction SilentlyContinue
+
+    Write-Host ""
+    Write-Host "[2/4] Publishing Agent (self-contained win-x64)..." -ForegroundColor Yellow
+    $agentOut = Join-Path $Root "artifacts\agent-win-x64"
+    if (Test-Path $agentOut) {
+        Get-ChildItem $agentOut -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $agentOut | Out-Null
     dotnet publish (Join-Path $Root "src\CherrySentinel.Agent\CherrySentinel.Agent.csproj") `
         -c $Configuration -r win-x64 --self-contained true `
         -p:PublishSingleFile=true `
         -p:IncludeNativeLibrariesForSelfExtract=true `
-        -o (Join-Path $Root "artifacts\agent-win-x64")
+        -o $agentOut
     if ($LASTEXITCODE -ne 0) { throw "Agent publish failed" }
 
-    Copy-Item (Join-Path $Root "config\rules.json") (Join-Path $Root "artifacts\agent-win-x64\") -Force -ErrorAction SilentlyContinue
-    Copy-Item (Join-Path $Root "config\allowlist.json") (Join-Path $Root "artifacts\agent-win-x64\") -Force -ErrorAction SilentlyContinue
-    Copy-Item $ico (Join-Path $Root "artifacts\agent-win-x64\") -Force
+    Copy-Item (Join-Path $Root "config\rules.json") $agentOut -Force -ErrorAction SilentlyContinue
+    Copy-Item (Join-Path $Root "config\allowlist.json") $agentOut -Force -ErrorAction SilentlyContinue
+    Copy-Item $ico $agentOut -Force
 
     Write-Host ""
-    Write-Host "[2/3] Publishing Dashboard..." -ForegroundColor Yellow
-    New-Item -ItemType Directory -Force -Path (Join-Path $Root "artifacts\dashboard-win-x64") | Out-Null
+    Write-Host "[2b/4] Publishing Agent Tray (self-contained)..." -ForegroundColor Yellow
+    dotnet publish (Join-Path $Root "src\CherrySentinel.Agent.Tray\CherrySentinel.Agent.Tray.csproj") `
+        -c $Configuration -r win-x64 --self-contained true `
+        -p:PublishSingleFile=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true `
+        -p:SelfContained=true `
+        -o $agentOut
+    if ($LASTEXITCODE -ne 0) { throw "Agent Tray publish failed" }
+
+    Write-Host ""
+    Write-Host "[3/4] Publishing Dashboard (self-contained win-x64)..." -ForegroundColor Yellow
+    $dashOut = Join-Path $Root "artifacts\dashboard-win-x64"
+    if (Test-Path $dashOut) {
+        Get-ChildItem $dashOut -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $dashOut | Out-Null
     dotnet publish (Join-Path $Root "src\CherrySentinel.Dashboard\CherrySentinel.Dashboard.csproj") `
-        -c $Configuration -r win-x64 --self-contained false `
-        -o (Join-Path $Root "artifacts\dashboard-win-x64")
+        -c $Configuration -r win-x64 --self-contained true `
+        -p:PublishSingleFile=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true `
+        -o $dashOut
     if ($LASTEXITCODE -ne 0) { throw "Dashboard publish failed" }
 
-    Copy-Item $ico (Join-Path $Root "artifacts\dashboard-win-x64\") -Force
-    New-Item -ItemType Directory -Force -Path (Join-Path $Root "artifacts\dashboard-win-x64\Assets") | Out-Null
-    Copy-Item $ico (Join-Path $Root "artifacts\dashboard-win-x64\Assets\") -Force
+    Copy-Item $ico $dashOut -Force
+    New-Item -ItemType Directory -Force -Path (Join-Path $dashOut "Assets") | Out-Null
+    Copy-Item $ico (Join-Path $dashOut "Assets\") -Force
 } else {
     Write-Host "[skip] Publish (using existing artifacts)" -ForegroundColor DarkYellow
 }
 
 $agentExe = Join-Path $Root "artifacts\agent-win-x64\CherrySentinel.Agent.exe"
 $dashExe = Join-Path $Root "artifacts\dashboard-win-x64\CherrySentinel.Dashboard.exe"
+$centralExe = Join-Path $Root "artifacts\server-win-x64\CherrySentinel.Server.exe"
 if (-not (Test-Path $agentExe)) { throw "Missing agent exe. Run without -SkipPublish." }
 if (-not (Test-Path $dashExe)) { throw "Missing dashboard exe. Run without -SkipPublish." }
+if (-not (Test-Path $centralExe)) { throw "Missing central exe. Run without -SkipPublish." }
 
 Write-Host ""
-Write-Host "[3/3] Compiling Setup.exe with Inno Setup..." -ForegroundColor Yellow
+Write-Host "[4/4] Compiling Full Setup.exe with Inno Setup..." -ForegroundColor Yellow
 $iscc = Find-ISCC
 if (-not $iscc) {
     throw "ISCC.exe not found. Install: winget install JRSoftware.InnoSetup"
@@ -112,6 +156,9 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host " Installer: $($setup.FullName)"
 Write-Host " Size     : $([math]::Round($setup.Length / 1MB, 1)) MB"
 Write-Host ""
+Write-Host " Full stack = Central + Agent + Dashboard"
+Write-Host " Runtime    = self-contained (no .NET install required on target PC)"
 Write-Host " Run as Administrator:"
 Write-Host "   $($setup.FullName)"
+Write-Host " Choose type: Full stack (recommended)"
 Write-Host ""

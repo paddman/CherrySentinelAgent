@@ -15,12 +15,12 @@ namespace CherrySentinel.Server.Correlation;
 /// </summary>
 public sealed class CrossHostCorrelator
 {
-    private readonly PostgresStore _store;
+    private readonly ICentralStore _store;
     private readonly CorrelationOptions _options;
     private readonly ILogger<CrossHostCorrelator> _logger;
 
     public CrossHostCorrelator(
-        PostgresStore store,
+        ICentralStore store,
         IOptions<CorrelationOptions> options,
         ILogger<CrossHostCorrelator> logger)
     {

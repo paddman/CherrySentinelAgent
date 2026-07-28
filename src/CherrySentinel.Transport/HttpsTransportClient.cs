@@ -72,22 +72,30 @@ public sealed class HttpsTransportClient : ITransportClient, IDisposable
 
     public async Task<bool> IsReachableAsync(CancellationToken cancellationToken)
     {
+        // Single short probe — never stack two long HttpClient timeouts (was freezing AgentWorker).
         try
         {
-            using var response = await _http.GetAsync("health", cancellationToken);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            if (!cancellationToken.CanBeCanceled)
+            {
+                linked.CancelAfter(TimeSpan.FromSeconds(5));
+            }
+
+            using var response = await _http.GetAsync("api/v1/health", linked.Token);
             if (response.IsSuccessStatusCode)
             {
                 _backoff.Reset();
                 return true;
             }
-
-            return false;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Central server unreachable; next delay ~{Delay}", _backoff.NextDelay());
-            return false;
+            _logger.LogDebug(ex, "Central health check failed base={Base}", _http.BaseAddress);
         }
+
+        _logger.LogWarning("Central server unreachable at {Base} (queue stays local)", _http.BaseAddress);
+        _ = _backoff.NextDelay();
+        return false;
     }
 
     public async Task<IngestResponse?> SendBatchAsync(AgentIngestBatch batch, CancellationToken cancellationToken)
@@ -119,15 +127,16 @@ public sealed class HttpsTransportClient : ITransportClient, IDisposable
         }
     }
 
-    public async Task SendHeartbeatAsync(AgentHeartbeat heartbeat, CancellationToken cancellationToken)
+    public async Task<HeartbeatResponse?> SendHeartbeatAsync(AgentHeartbeat heartbeat, CancellationToken cancellationToken)
     {
         try
         {
             using var response = await _http.PostAsJsonAsync("api/v1/agents/heartbeat", heartbeat, JsonOptions, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogDebug("Heartbeat failed: {Status}", response.StatusCode);
-                return;
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning("Heartbeat failed: {Status} {Body}", response.StatusCode, body);
+                return null;
             }
 
             var hb = await response.Content.ReadFromJsonAsync<HeartbeatResponse>(JsonOptions, cancellationToken);
@@ -138,34 +147,29 @@ public sealed class HttpsTransportClient : ITransportClient, IDisposable
                 {
                     _logger.LogWarning("Clock skew vs server: {Seconds}s", hb.ClockSkewSeconds);
                 }
+
+                if (hb.PendingActions.Count > 0)
+                {
+                    _logger.LogWarning("Central delivered {Count} pending action(s)", hb.PendingActions.Count);
+                }
             }
 
             _backoff.Reset();
+            _logger.LogInformation("Heartbeat OK to {Base} agent={AgentId}", _http.BaseAddress, heartbeat.AgentId);
+            return hb;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Heartbeat error (offline mode continues)");
+            _logger.LogWarning(ex, "Heartbeat error to {Base} (offline mode continues)", _http.BaseAddress);
+            return null;
         }
     }
 
     private static ByteArrayContent CreateJsonContent<T>(T value)
     {
         var json = JsonSerializer.SerializeToUtf8Bytes(value, JsonOptions);
-        // Optional gzip compression for large batches
-        if (json.Length > 4096)
-        {
-            using var ms = new MemoryStream();
-            using (var gz = new GZipStream(ms, CompressionLevel.Fastest, leaveOpen: true))
-            {
-                gz.Write(json, 0, json.Length);
-            }
-
-            var content = new ByteArrayContent(ms.ToArray());
-            content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-            content.Headers.ContentEncoding.Add("gzip");
-            return content;
-        }
-
+        // Prefer plain JSON for reliability. Central also accepts gzip (RequestDecompression),
+        // but older Central builds returned 400 on Content-Encoding: gzip — that made Agent/Dashboard look disconnected.
         var plain = new ByteArrayContent(json);
         plain.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         return plain;

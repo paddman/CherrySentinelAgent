@@ -79,7 +79,11 @@ public static partial class EventDataSanitizer
     public static readonly HashSet<string> AllowedResponseCommands = new(StringComparer.OrdinalIgnoreCase)
     {
         "BlockDestinationIp",
+        "BlockSourceIp",
         "BlockRemoteIp",
+        "BlockPort",
+        "OpenPort",
+        "ClosePort",
         "RemoveFirewallBlock",
         "StopService",
         "DisableService",

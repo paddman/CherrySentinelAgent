@@ -32,3 +32,8 @@ appsettings.*.local.json
 ## OS
 Thumbs.db
 Desktop.ini
+
+# Local noise
+error/
+assets/installer/_face_tmp.png
+

@@ -96,15 +96,26 @@ $exe = Join-Path $SourceDir $exeName
 if (-not (Test-Path $exe)) { Write-Fail "Agent binary not found: $exe" }
 Write-Ok "Found $exe"
 
-# 6) Stop existing service
+# 6) Stop existing service + kill processes (in-place upgrade safe)
+Write-Step "Stopping existing Agent / Tray (force kill for upgrade)"
+$stopHelper = Join-Path $PSScriptRoot "setup-helpers\stop-agent-for-upgrade.ps1"
+if (Test-Path $stopHelper) {
+    & $stopHelper -ServiceName $ServiceName -InstallDir $InstallDir
+} else {
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    & sc.exe stop $ServiceName | Out-Null
+    foreach ($n in @("CherrySentinel.Agent", "CherrySentinel.Agent.Tray")) {
+        Get-Process -Name $n -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        & taskkill.exe /F /IM "$n.exe" /T 2>$null | Out-Null
+    }
+    Start-Sleep -Seconds 1
+}
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existing) {
-    Write-Step "Stopping existing service"
-    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
     & sc.exe delete $ServiceName | Out-Null
     Start-Sleep -Seconds 2
 }
+Write-Ok "Previous instance stopped"
 
 # 7) Directories + ACL
 Write-Step "Creating directories and ACLs"
@@ -213,6 +224,21 @@ try {
     Write-Host "NOTE: Start Menu shortcut skipped: $_" -ForegroundColor Yellow
 }
 
+# System tray companion (notification area icon)
+$trayHelper = Join-Path $PSScriptRoot "setup-helpers\register-agent-tray.ps1"
+if (-not (Test-Path $trayHelper)) {
+    $trayHelper = Join-Path $InstallDir "Installer\register-agent-tray.ps1"
+}
+if (Test-Path $trayHelper) {
+    Write-Step "Registering system tray icon"
+    try {
+        & $trayHelper -InstallDir $InstallDir -StartNow "1" -RunAtLogon "1"
+        Write-Ok "Tray icon registered (notification area)"
+    } catch {
+        Write-Host "NOTE: tray registration skipped: $_" -ForegroundColor Yellow
+    }
+}
+
 Write-Host ""
 Write-Host "Install complete." -ForegroundColor Green
 Write-Host "  Service : $ServiceName ($DisplayName)"
@@ -220,6 +246,7 @@ Write-Host "  Install : $InstallDir"
 Write-Host "  Data    : $AgentData"
 Write-Host "  Logs    : $LogDir"
 Write-Host "  Icon    : $iconDest"
+Write-Host "  Tray    : CherrySentinel.Agent.Tray (system tray / notification area)"
 Write-Host "  Mode    : DetectOnly (no auto block/kill)"
 Write-Host ""
 Write-Host "Rollback instructions:" -ForegroundColor Yellow

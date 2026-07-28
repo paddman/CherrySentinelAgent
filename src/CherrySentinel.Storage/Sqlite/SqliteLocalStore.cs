@@ -16,6 +16,8 @@ public sealed class SqliteLocalStore : ILocalStore
     private readonly AgentOptions _agentOptions;
     private readonly ILogger<SqliteLocalStore> _logger;
     private readonly string _dbPath;
+    // Single shared SqliteConnection is NOT thread-safe — serialize all DB work on one gate.
+    // (Previously 4 concurrent slots caused hangs/starvation under load.)
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SqliteConnection? _connection;
     private bool _disposed;
@@ -446,7 +448,7 @@ public sealed class SqliteLocalStore : ILocalStore
                 cmd.Parameters.AddWithValue("$event_id", eventId.Value);
             }
 
-            cmd.CommandText += " ORDER BY timestamp_utc ASC;";
+            cmd.CommandText += " ORDER BY timestamp_utc DESC LIMIT 5000;";
             cmd.Parameters.AddWithValue("$from", fromUtc.ToString("O"));
             cmd.Parameters.AddWithValue("$to", toUtc.ToString("O"));
 
@@ -747,17 +749,11 @@ public sealed class SqliteLocalStore : ILocalStore
         }
     }
 
-    public async Task<long> GetDatabaseSizeBytesAsync(CancellationToken cancellationToken)
+    public Task<long> GetDatabaseSizeBytesAsync(CancellationToken cancellationToken)
     {
-        await _gate.WaitAsync(cancellationToken);
-        try
-        {
-            return await GetDatabaseSizeBytesUnsafeAsync();
-        }
-        finally
-        {
-            _gate.Release();
-        }
+        // File lengths only — do not take the DB gate (avoids status/heartbeat blocking on queue writes).
+        cancellationToken.ThrowIfCancellationRequested();
+        return GetDatabaseSizeBytesUnsafeAsync();
     }
 
     private Task<long> GetDatabaseSizeBytesUnsafeAsync()

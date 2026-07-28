@@ -32,6 +32,36 @@ public sealed class AgentHeartbeat
     public long WorkingSetBytes { get; set; }
     public double? CpuPercentEstimate { get; set; }
     public double ClockSkewSeconds { get; set; }
+
+    /// <summary>Primary host IPv4/IPv6 for inventory (fleet UI).</summary>
+    public string? HostIp { get; set; }
+
+    /// <summary>Central URL this agent is configured to use (helps debug wrong-server config).</summary>
+    public string? CentralUrl { get; set; }
+
+    /// <summary>windows | linux | unknown</summary>
+    public string Platform { get; set; } = "windows";
+
+    /// <summary>Last outbound error (ingest/heartbeat), if any.</summary>
+    public string? LastError { get; set; }
+}
+
+/// <summary>Fleet inventory row returned by GET /api/v1/agents</summary>
+public sealed class AgentInventoryItem
+{
+    public string AgentId { get; set; } = string.Empty;
+    public string ComputerName { get; set; } = string.Empty;
+    public string? AgentVersion { get; set; }
+    public string? OsVersion { get; set; }
+    public string? HostIp { get; set; }
+    public string? CentralUrl { get; set; }
+    public string Platform { get; set; } = "windows";
+    public DateTimeOffset LastSeenUtc { get; set; }
+    public string? Status { get; set; }
+    public long QueueDepth { get; set; }
+    public string? LastError { get; set; }
+    public bool Online { get; set; }
+    public int OfflineSeconds { get; set; }
 }
 
 public sealed class HeartbeatResponse

@@ -3,6 +3,13 @@ param(
 )
 
 $ErrorActionPreference = "SilentlyContinue"
+& sc.exe stop $ServiceName | Out-Null
+Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 500
+foreach ($n in @("CherrySentinel.Agent", "CherrySentinel.Agent.Tray")) {
+    Get-Process -Name $n -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    & taskkill.exe /F /IM "$n.exe" /T 2>$null | Out-Null
+}
 $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($svc) {
     if ($svc.Status -ne "Stopped") {

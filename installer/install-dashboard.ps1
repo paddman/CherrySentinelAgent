@@ -32,7 +32,7 @@ if (-not [Environment]::Is64BitOperatingSystem) { Write-Fail "x64 OS required." 
 
 $exe = Join-Path $SourceDir $ExeName
 if (-not (Test-Path $exe)) {
-    Write-Fail "Dashboard binary not found: $exe`nPublish first:`n  dotnet publish src\CherrySentinel.Dashboard\CherrySentinel.Dashboard.csproj -c Release -r win-x64 --self-contained false -o artifacts\dashboard-win-x64"
+    Write-Fail "Dashboard binary not found: $exe`nPublish first:`n  dotnet publish src\CherrySentinel.Dashboard\CherrySentinel.Dashboard.csproj -c Release -r win-x64 --self-contained true -o artifacts\dashboard-win-x64"
 }
 
 Write-Step "Creating install directory"

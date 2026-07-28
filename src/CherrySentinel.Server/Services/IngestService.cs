@@ -6,13 +6,13 @@ namespace CherrySentinel.Server.Services;
 
 public sealed class IngestService
 {
-    private readonly PostgresStore _store;
+    private readonly ICentralStore _store;
     private readonly CrossHostCorrelator _correlator;
     private readonly LateralMovementTracker _lateral;
     private readonly ILogger<IngestService> _logger;
 
     public IngestService(
-        PostgresStore store,
+        ICentralStore store,
         CrossHostCorrelator correlator,
         LateralMovementTracker lateral,
         ILogger<IngestService> logger)

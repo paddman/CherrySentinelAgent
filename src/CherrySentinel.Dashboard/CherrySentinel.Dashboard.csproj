@@ -10,9 +10,9 @@
     <RootNamespace>CherrySentinel.Dashboard</RootNamespace>
     <Product>Cherry Sentinel Dashboard</Product>
     <Description>Native Windows dashboard — Cherry Sentinel GUI Pack</Description>
-    <Version>1.0.0</Version>
+
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>false</SelfContained>
+    <SelfContained>true</SelfContained>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\CherrySentinel.Shared\CherrySentinel.Shared.csproj" />

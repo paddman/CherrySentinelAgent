@@ -14,6 +14,14 @@ public sealed class AgentOptions
     public int CollectionIntervalSeconds { get; set; } = 5;
     /// <summary>When true (default), no destructive response actions execute without explicit central approval.</summary>
     public bool DetectOnly { get; set; } = true;
+
+    /// <summary>
+    /// Security operating mode:
+    /// Ids = detect + alert only (classic IDS);
+    /// Ips = detect + automatic prevention (firewall block) for high/critical (classic IPS).
+    /// DetectOnly is treated as Ids when Mode is empty.
+    /// </summary>
+    public string Mode { get; set; } = "Ids";
 }
 
 public sealed class CentralServerOptions
@@ -38,6 +46,13 @@ public sealed class CentralServerOptions
     public int FlushIntervalSeconds { get; set; } = 15;
     public int BatchSize { get; set; } = 200;
     public int OfflineQueueLimit { get; set; } = 100_000;
+
+    /// <summary>Optional syslog forward of alerts to Central (or any syslog receiver).</summary>
+    public bool SyslogEnabled { get; set; }
+    public string SyslogHost { get; set; } = "127.0.0.1";
+    public int SyslogPort { get; set; } = 5514;
+    public string SyslogProtocol { get; set; } = "Udp";
+    public string SyslogAppName { get; set; } = "CherrySentinel";
 }
 
 public sealed class StorageOptions
@@ -149,13 +164,31 @@ public sealed class ResponseOptions
 {
     public const string SectionName = "Response";
 
-    /// <summary>Default true: detect-only, no block/kill without central approval.</summary>
+    /// <summary>Default true: detect-only, no block/kill without central approval (IDS). Set false for IPS auto-block.</summary>
     public bool DetectOnly { get; set; } = true;
     public bool Enabled { get; set; } = true;
     public bool AllowNetworkIsolation { get; set; }
     public bool AllowProcessTerminate { get; set; }
     public bool LogOnlyMode { get; set; } = true;
     public string EvidenceDirectory { get; set; } = @"C:\ProgramData\CherrySentinel\Agent\evidence";
+
+    /// <summary>Ids | Ips — when Ips, local detections may auto-block (see AutoBlock*).</summary>
+    public string Mode { get; set; } = "Ids";
+
+    /// <summary>Minimum severity that triggers auto-block in IPS mode: Medium | High | Critical.</summary>
+    public string AutoBlockMinSeverity { get; set; } = "High";
+
+    /// <summary>In IPS mode, auto block inbound from alert.SourceIp.</summary>
+    public bool AutoBlockSourceIp { get; set; } = true;
+
+    /// <summary>In IPS mode, auto block outbound to alert.DestinationIp.</summary>
+    public bool AutoBlockDestinationIp { get; set; } = true;
+
+    /// <summary>In IPS mode, also block destination port if present on related connection evidence (optional).</summary>
+    public bool AutoBlockDestinationPort { get; set; }
+
+    /// <summary>Never auto-quarantine whole host unless true (dangerous).</summary>
+    public bool AutoQuarantineHost { get; set; }
 }
 
 public sealed class LoggingPathsOptions

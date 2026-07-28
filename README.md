@@ -57,24 +57,38 @@ src/   tests/   installer/   docs/   config/   rules/
 
 ## Installer (Setup.exe)
 
-สร้างตัวติดตั้ง Windows แบบ **EXE** (Inno Setup):
+### Central แยก (ติดตั้งบนเครื่องศูนย์กลางก่อน)
 
 ```powershell
 cd C:\data_nt\CherrySentinelAgent
+.\installer\build-setup-central.ps1
+# → artifacts\setup\CherrySentinel-Central-Setup-1.0.0.exe
+```
+
+- รัน Admin → ใส่ **HTTPS port** (default `7443`)
+- Service: `CherrySentinelCentral` · SQLite · URL: `https://localhost:7443`
+- Silent: `CherrySentinel-Central-Setup-*.exe /VERYSILENT /Port=7443`
+
+### Agent แยก (บน endpoint)
+
+```powershell
+.\installer\build-setup-agent.ps1
+# → artifacts\setup\CherrySentinel-Agent-Setup-*.exe
+```
+
+- รัน Admin → ใส่ **Central Server URL** (เช่น `https://10.0.0.5:7443`)
+- Tray icon + Mini Dashboard
+- Silent: `CherrySentinel-Agent-Setup-*.exe /VERYSILENT /CentralUrl=https://10.0.0.5:7443`
+- Agent/Dashboard ชี้ Central เดียวกัน — รายละเอียด: [`docs/installation.md`](docs/installation.md)
+
+### Full stack (Agent + Dashboard)
+
+```powershell
 .\installer\build-setup.ps1
+# → artifacts\setup\CherrySentinel-Setup-*.exe
 ```
 
-ได้ไฟล์:
-
-```text
-artifacts\setup\CherrySentinel-Setup-1.0.0.exe
-```
-
-ดับเบิลคลิก (Run as Administrator) แล้วเลือก:
-- **Full** = Agent (Windows Service) + Dashboard
-- **Agent only** / **Dashboard only**
-
-ติดตั้งไปที่ `C:\Program Files\Cherry Sentinel\` พร้อมไอคอน + Start Menu / Desktop
+เลือก Full / Agent only / Dashboard only → `C:\Program Files\Cherry Sentinel\`
 
 ## Desktop Dashboard (native WPF app — not web)
 

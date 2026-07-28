@@ -1,13 +1,13 @@
 using System.Diagnostics;
 using System.Management;
 using System.Runtime.Versioning;
-using System.Text;
 using System.Text.Json;
 using CherrySentinel.Core.Abstractions;
 using CherrySentinel.Core.Compatibility;
 using CherrySentinel.Core.Configuration;
 using CherrySentinel.Core.Security;
 using CherrySentinel.Response.Firewall;
+using CherrySentinel.Shared.Enums;
 using CherrySentinel.Shared.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -15,8 +15,9 @@ using Microsoft.Extensions.Options;
 namespace CherrySentinel.Response;
 
 /// <summary>
-/// Response engine. Default = detect-only (no block/kill without explicit Central approval).
-/// Only allowlisted action types are accepted. No arbitrary shell from Central.
+/// Response engine supporting IDS (detect-only) and IPS (auto prevention) modes.
+/// Default = IDS. IPS auto-blocks only when Mode=Ips and severity threshold is met.
+/// Central-approved actions always run when Approved=true.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class LocalResponseExecutor : IResponseExecutor
@@ -41,18 +42,112 @@ public sealed class LocalResponseExecutor : IResponseExecutor
         _evidence = evidence;
     }
 
-    public Task<ResponseActionRecord> ExecuteAsync(DetectionAlert alert, CancellationToken cancellationToken)
+    public bool IsIpsMode =>
+        string.Equals(_options.Mode, "Ips", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(_options.Mode, "IPS", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(_agentOptions.Mode, "Ips", StringComparison.OrdinalIgnoreCase) ||
+        (!_options.DetectOnly && !_agentOptions.DetectOnly && !_options.LogOnlyMode);
+
+    public bool IsIdsMode => !IsIpsMode;
+
+    public async Task<ResponseActionRecord> ExecuteAsync(DetectionAlert alert, CancellationToken cancellationToken)
     {
-        var record = BaseRecord("LogOnly", alert.AlertId, string.Empty);
-        record.Requester = "local-detection";
-        record.Reason = $"Detection {alert.RuleId}: {alert.Title}";
-        record.Status = "Completed";
-        record.BeforeState = "n/a";
-        record.Result = "detect-only: alert logged, no containment";
-        record.RollbackCommand = string.Empty;
-        record.AuditLog = Audit(record, "detect-only default; no destructive action");
-        _logger.LogWarning("DETECT-ONLY response for {Rule} AlertId={AlertId}", alert.RuleId, alert.AlertId);
-        return Task.FromResult(record);
+        // --- IDS path: always log ---
+        if (IsIdsMode || !MeetsAutoBlockSeverity(alert.Severity))
+        {
+            var record = BaseRecord("LogOnly", alert.AlertId, string.Empty);
+            record.Requester = "local-ids";
+            record.Reason = $"IDS {alert.RuleId}: {alert.Title}";
+            record.Status = "Completed";
+            record.BeforeState = "n/a";
+            record.Result = IsIdsMode
+                ? "IDS detect-only: alert logged, no containment"
+                : $"IDS: severity {alert.Severity} below auto-block threshold {_options.AutoBlockMinSeverity}";
+            record.RollbackCommand = string.Empty;
+            record.AuditLog = Audit(record, "ids-log");
+            _logger.LogWarning("IDS alert {Rule} sev={Sev} AlertId={AlertId}", alert.RuleId, alert.Severity, alert.AlertId);
+            return record;
+        }
+
+        // --- IPS path: log + automatic prevention ---
+        var combined = BaseRecord("IpsAutoBlock", alert.AlertId, string.Empty);
+        combined.Requester = "local-ips";
+        combined.Reason = $"IPS auto-prevent {alert.RuleId}: {alert.Title}";
+        combined.Approved = true;
+        combined.ApprovalId = "local-ips-policy";
+        var results = new List<string>();
+        var rollbacks = new List<string>();
+        var before = _firewall.CaptureFirewallStatus();
+        combined.BeforeState = before.Length > 1500 ? before[..1500] : before;
+
+        try
+        {
+            if (_options.AutoBlockSourceIp &&
+                !string.IsNullOrWhiteSpace(alert.SourceIp) &&
+                IsPublicishIp(alert.SourceIp))
+            {
+                var rule = $"CSA-IPS-Src-{SanitizeToken(alert.SourceIp)}-{alert.AlertId[..8]}";
+                var r = _firewall.BlockIp(alert.SourceIp, "in", rule, combined.Reason);
+                results.Add(r.Success ? $"block-src {alert.SourceIp} OK" : $"block-src FAIL {r.Error}");
+                if (!string.IsNullOrEmpty(r.RollbackCommand))
+                {
+                    rollbacks.Add(r.RollbackCommand);
+                }
+
+                _logger.LogWarning("IPS auto-block SOURCE {Ip} rule={Rule} ok={Ok}", alert.SourceIp, rule, r.Success);
+            }
+
+            if (_options.AutoBlockDestinationIp &&
+                !string.IsNullOrWhiteSpace(alert.DestinationIp) &&
+                IsPublicishIp(alert.DestinationIp))
+            {
+                var rule = $"CSA-IPS-Dst-{SanitizeToken(alert.DestinationIp)}-{alert.AlertId[..8]}";
+                var r = _firewall.BlockIp(alert.DestinationIp, "out", rule, combined.Reason);
+                results.Add(r.Success ? $"block-dst {alert.DestinationIp} OK" : $"block-dst FAIL {r.Error}");
+                if (!string.IsNullOrEmpty(r.RollbackCommand))
+                {
+                    rollbacks.Add(r.RollbackCommand);
+                }
+
+                _logger.LogWarning("IPS auto-block DEST {Ip} rule={Rule} ok={Ok}", alert.DestinationIp, rule, r.Success);
+            }
+
+            if (_options.AutoBlockDestinationPort &&
+                TryExtractPort(alert, out var port) &&
+                port is > 0 and <= 65535)
+            {
+                var rule = $"CSA-IPS-Port-{port}-{alert.AlertId[..8]}";
+                var r = _firewall.BlockPort("out", "tcp", null, port, alert.DestinationIp, rule, combined.Reason);
+                results.Add(r.Success ? $"block-port {port} OK" : $"block-port FAIL {r.Error}");
+                if (!string.IsNullOrEmpty(r.RollbackCommand))
+                {
+                    rollbacks.Add(r.RollbackCommand);
+                }
+            }
+
+            if (results.Count == 0)
+            {
+                combined.Status = "Completed";
+                combined.Result = "IPS: no blockable IP/port on alert (logged only)";
+            }
+            else
+            {
+                var anyFail = results.Exists(x => x.Contains("FAIL", StringComparison.Ordinal));
+                combined.Status = anyFail ? "Partial" : "Completed";
+                combined.Result = "IPS: " + string.Join("; ", results);
+                combined.RollbackCommand = string.Join(" && ", rollbacks);
+            }
+        }
+        catch (Exception ex)
+        {
+            combined.Status = "Failed";
+            combined.Error = ex.Message;
+            _logger.LogError(ex, "IPS auto-block failed for {Rule}", alert.RuleId);
+        }
+
+        combined.AuditLog = Audit(combined, "ips-auto");
+        await Task.CompletedTask;
+        return combined;
     }
 
     public async Task<ResponseActionRecord> ExecuteRequestAsync(ResponseActionRequest request, CancellationToken cancellationToken)
@@ -73,7 +168,7 @@ public sealed class LocalResponseExecutor : IResponseExecutor
             return record;
         }
 
-        // Hard rule: destructive actions need explicit Central approval.
+        // Hard rule: destructive actions need explicit Central approval (unless local IPS already set Approved).
         if (record.RequiresApproval && !request.Approved)
         {
             record.Status = "PendingApproval";
@@ -82,13 +177,13 @@ public sealed class LocalResponseExecutor : IResponseExecutor
             return record;
         }
 
-        if ((_options.DetectOnly || _agentOptions.DetectOnly || _options.LogOnlyMode) &&
+        if (IsIdsMode &&
             record.RequiresApproval &&
             !request.Approved)
         {
             record.Status = "Skipped";
-            record.Result = "DetectOnly=true";
-            record.AuditLog = Audit(record, "detect-only");
+            record.Result = "IDS/DetectOnly=true";
+            record.AuditLog = Audit(record, "ids-mode");
             return record;
         }
 
@@ -102,25 +197,66 @@ public sealed class LocalResponseExecutor : IResponseExecutor
                     break;
 
                 case "BlockDestinationIp":
-                case "BlockRemoteIp":
                     {
                         var ip = request.TargetIp ?? throw new ArgumentException("TargetIp required");
-                        var rule = $"CSA-Block-{SanitizeToken(ip)}-{record.RequestId[..8]}";
-                        var dir = request.ActionType == "BlockDestinationIp" ? "out" : "in";
-                        var result = _firewall.BlockIp(ip, dir, rule, request.Reason);
+                        var rule = request.RuleName ?? $"CSA-Block-Dst-{SanitizeToken(ip)}-{record.RequestId[..8]}";
+                        var dir = string.IsNullOrWhiteSpace(request.Direction) ? "out" : request.Direction!;
+                        var result = _firewall.BlockIp(ip, dir, EnsureCsa(rule), request.Reason);
                         ApplyFirewall(record, result);
                         break;
                     }
 
+                case "BlockSourceIp":
+                case "BlockRemoteIp":
+                    {
+                        var ip = request.TargetIp ?? throw new ArgumentException("TargetIp required");
+                        var rule = request.RuleName ?? $"CSA-Block-Src-{SanitizeToken(ip)}-{record.RequestId[..8]}";
+                        var dir = string.IsNullOrWhiteSpace(request.Direction) ? "in" : request.Direction!;
+                        var result = _firewall.BlockIp(ip, dir, EnsureCsa(rule), request.Reason);
+                        ApplyFirewall(record, result);
+                        break;
+                    }
+
+                case "BlockPort":
+                    {
+                        var rule = request.RuleName ??
+                                   $"CSA-Block-Port-{request.TargetPort ?? 0}-{record.RequestId[..8]}";
+                        var dir = string.IsNullOrWhiteSpace(request.Direction) ? "in" : request.Direction!;
+                        var proto = string.IsNullOrWhiteSpace(request.Protocol) ? "tcp" : request.Protocol!;
+                        int? localPort = request.TargetPort;
+                        int? remotePort = null;
+                        if (string.Equals(request.ServiceName, "remote", StringComparison.OrdinalIgnoreCase))
+                        {
+                            remotePort = request.TargetPort;
+                            localPort = null;
+                        }
+
+                        var result = _firewall.BlockPort(dir, proto, localPort, remotePort, request.TargetIp,
+                            EnsureCsa(rule), request.Reason);
+                        ApplyFirewall(record, result);
+                        break;
+                    }
+
+                case "OpenPort":
+                    {
+                        var port = request.TargetPort ?? throw new ArgumentException("TargetPort required for OpenPort");
+                        var rule = request.RuleName ?? $"CSA-Open-Port-{port}-{record.RequestId[..8]}";
+                        var dir = string.IsNullOrWhiteSpace(request.Direction) ? "in" : request.Direction!;
+                        var proto = string.IsNullOrWhiteSpace(request.Protocol) ? "tcp" : request.Protocol!;
+                        var result = _firewall.OpenPort(dir, proto, port, EnsureCsa(rule), request.Reason);
+                        ApplyFirewall(record, result);
+                        break;
+                    }
+
+                case "ClosePort":
                 case "RemoveFirewallBlock":
                     {
-                        var rule = $"CSA-Block-{SanitizeToken(request.TargetIp ?? "x")}-*";
-                        // Require exact rule name in TargetIp field prefix CSA-
-                        var ruleName = request.ServiceName ?? request.TargetIp;
-                        if (string.IsNullOrWhiteSpace(ruleName) || !ruleName.StartsWith("CSA-", StringComparison.OrdinalIgnoreCase))
+                        var ruleName = request.RuleName ?? request.ServiceName ?? request.TargetIp;
+                        if (string.IsNullOrWhiteSpace(ruleName) ||
+                            !ruleName.StartsWith("CSA-", StringComparison.OrdinalIgnoreCase))
                         {
-                            // ServiceName carries rule name when removing
-                            throw new ArgumentException("Provide CSA- rule name in ServiceName for RemoveFirewallBlock.");
+                            throw new ArgumentException(
+                                "Provide CSA- rule name in RuleName (or ServiceName) to close/remove firewall rule.");
                         }
 
                         var result = _firewall.RemoveRule(ruleName);
@@ -145,6 +281,14 @@ public sealed class LocalResponseExecutor : IResponseExecutor
                     break;
 
                 case "TerminateProcess":
+                    if (!_options.AllowProcessTerminate &&
+                        !string.Equals(request.Requester, "dashboard-operator", StringComparison.OrdinalIgnoreCase))
+                    {
+                        record.Status = "Rejected";
+                        record.Error = "AllowProcessTerminate=false";
+                        break;
+                    }
+
                     TerminateProcess(record, request.ProcessId);
                     break;
 
@@ -173,27 +317,28 @@ public sealed class LocalResponseExecutor : IResponseExecutor
 
                 case "QuarantineHost":
                     {
-                        if (!WindowsCompatibility.SupportsAdvancedNetworkIsolation)
+                        if (!_options.AutoQuarantineHost &&
+                            !request.Approved)
                         {
-                            // Server 2012-compatible quarantine: block all inbound except management is too broad;
-                            // apply conservative inbound block of non-local with netsh profile — require approval only.
-                            record.Status = "Completed";
-                            record.BeforeState = _firewall.CaptureFirewallStatus();
-                            var r1 = _firewall.BlockIp("any", "in", $"CSA-Quarantine-In-{record.RequestId[..8]}", request.Reason);
-                            // netsh may not accept "any" on older builds — fall back message
-                            record.Result = r1.Success
-                                ? "Quarantine inbound rule applied (Server 2012-compatible netsh)"
-                                : $"Quarantine limited: {r1.Error}. Manual isolation recommended.";
-                            record.RollbackCommand = r1.RollbackCommand;
-                            record.Status = r1.Success ? "Completed" : "Failed";
+                            record.Status = "Rejected";
+                            record.Error = "Quarantine requires approved Central/Dashboard action";
+                            break;
+                        }
+
+                        record.BeforeState = _firewall.CaptureFirewallStatus();
+                        var r1 = _firewall.BlockIp("0.0.0.0/0", "in", $"CSA-Quarantine-In-{record.RequestId[..8]}", request.Reason);
+                        // 0.0.0.0/0 may fail validation — use alternative
+                        if (!r1.Success)
+                        {
+                            record.Result = $"Quarantine limited: {r1.Error}. Prefer per-IP IPS blocks or NAC.";
+                            record.Status = "Failed";
                             record.Error = r1.Error;
                         }
                         else
                         {
+                            record.Result = "Quarantine inbound rule applied";
+                            record.RollbackCommand = r1.RollbackCommand;
                             record.Status = "Completed";
-                            record.Result = "Quarantine signaled (operator must complete network isolation via NAC/firewall).";
-                            record.BeforeState = _firewall.CaptureFirewallStatus();
-                            record.RollbackCommand = "# remove quarantine rules with RemoveFirewallBlock";
                         }
 
                         break;
@@ -216,13 +361,82 @@ public sealed class LocalResponseExecutor : IResponseExecutor
         return record;
     }
 
+    private bool MeetsAutoBlockSeverity(Severity severity)
+    {
+        var min = ParseSeverity(_options.AutoBlockMinSeverity);
+        return severity >= min;
+    }
+
+    private static Severity ParseSeverity(string? s)
+    {
+        if (Enum.TryParse<Severity>(s, true, out var v))
+        {
+            return v;
+        }
+
+        return Severity.High;
+    }
+
+    private static bool IsPublicishIp(string ip)
+    {
+        if (!System.Net.IPAddress.TryParse(ip, out var addr))
+        {
+            return false;
+        }
+
+        // Still allow private RFC1918 — lateral movement is internal. Block loopback only.
+        if (System.Net.IPAddress.IsLoopback(addr))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryExtractPort(DetectionAlert alert, out int port)
+    {
+        port = 0;
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(alert.EvidenceJson) ? "[]" : alert.EvidenceJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                if (el.TryGetProperty("RemotePort", out var p) && p.TryGetInt32(out port) && port > 0)
+                {
+                    return true;
+                }
+
+                if (el.TryGetProperty("remotePort", out p) && p.TryGetInt32(out port) && port > 0)
+                {
+                    return true;
+                }
+
+                if (el.TryGetProperty("DestinationPort", out p) && p.TryGetInt32(out port) && port > 0)
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return false;
+    }
+
     private static bool RequiresApproval(string actionType) =>
         actionType is not ("LogOnly" or "ExportEvidence");
 
     private void ApplyFirewall(ResponseActionRecord record, FirewallChangeResult result)
     {
         record.BeforeState = result.BeforeState;
-        record.Result = result.Result;
+        record.Result = result.Result + (result.RuleName is null ? "" : $" rule={result.RuleName}");
         record.RollbackCommand = result.RollbackCommand;
         record.Status = result.Success ? "Completed" : "Failed";
         record.Error = result.Error;
@@ -351,4 +565,9 @@ public sealed class LocalResponseExecutor : IResponseExecutor
 
     private static string SanitizeToken(string ip) =>
         new string(ip.Where(c => char.IsLetterOrDigit(c) || c is '.' or ':' or '-').ToArray());
+
+    private static string EnsureCsa(string ruleName) =>
+        ruleName.StartsWith("CSA-", StringComparison.OrdinalIgnoreCase)
+            ? ruleName
+            : "CSA-" + ruleName;
 }

@@ -39,17 +39,55 @@ public sealed class CentralApiClient : IDisposable
 
     public async Task<bool> HealthAsync(CancellationToken ct = default)
     {
+        var info = await GetHealthInfoAsync(ct);
+        return info.Ok;
+    }
+
+    /// <summary>Health + Central product version from /api/v1/health</summary>
+    public async Task<(bool Ok, string? Version, string? Product)> GetHealthInfoAsync(CancellationToken ct = default)
+    {
         try
         {
-            using var resp = await _http.GetAsync("health", ct);
-            if (resp.IsSuccessStatusCode) return true;
-            using var resp2 = await _http.GetAsync("api/v1/health", ct);
-            return resp2.IsSuccessStatusCode;
+            using var resp = await _http.GetAsync("api/v1/health", ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                using var resp2 = await _http.GetAsync("health", ct);
+                if (!resp2.IsSuccessStatusCode) return (false, null, null);
+                var body2 = await resp2.Content.ReadAsStringAsync(ct);
+                return (true, ParseVersion(body2), ParseProduct(body2));
+            }
+
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return (true, ParseVersion(body), ParseProduct(body));
         }
         catch
         {
-            return false;
+            return (false, null, null);
         }
+    }
+
+    private static string? ParseVersion(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("version", out var v)) return v.GetString();
+            if (root.TryGetProperty("productVersion", out var pv)) return pv.GetString();
+        }
+        catch { /* ignore */ }
+        return null;
+    }
+
+    private static string? ParseProduct(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("product", out var p)) return p.GetString();
+        }
+        catch { /* ignore */ }
+        return null;
     }
 
     public async Task<List<Incident>> GetIncidentsAsync(int take = 100, CancellationToken ct = default)
@@ -113,6 +151,37 @@ public sealed class CentralApiClient : IDisposable
         catch
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Queue an approved response action for an agent (delivered on next heartbeat).
+    /// </summary>
+    public async Task<(bool Ok, string Message, ResponseActionRequest? Saved)> PostActionAsync(
+        ResponseActionRequest request,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            request.Approved = true;
+            request.ApprovalId ??= Guid.NewGuid().ToString("N");
+            request.Requester = string.IsNullOrWhiteSpace(request.Requester)
+                ? "dashboard-operator"
+                : request.Requester;
+
+            using var resp = await _http.PostAsJsonAsync("api/v1/actions", request, JsonOptions, ct);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return (false, $"{(int)resp.StatusCode}: {body}", null);
+            }
+
+            var saved = JsonSerializer.Deserialize<ResponseActionRequest>(body, JsonOptions);
+            return (true, "queued for agent (next heartbeat)", saved ?? request);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message, null);
         }
     }
 

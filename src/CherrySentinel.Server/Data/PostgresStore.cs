@@ -7,7 +7,7 @@ using Npgsql;
 
 namespace CherrySentinel.Server.Data;
 
-public sealed class PostgresStore
+public sealed class PostgresStore : ICentralStore
 {
     private readonly string _cs;
     private readonly ILogger<PostgresStore> _logger;
@@ -559,4 +559,134 @@ public sealed class PostgresStore
         EvidenceJson = reader.IsDBNull(26) ? "[]" : reader.GetString(26),
         Status = reader.GetString(27)
     };
+
+    public async Task SavePendingActionAsync(ResponseActionRequest request, string agentKey)
+    {
+        await EnsurePendingTablesAsync();
+        await using var conn = new NpgsqlConnection(_cs);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            INSERT INTO pending_actions(request_id, agent_key, payload, created_at_utc, delivered)
+            VALUES (@id, @agent, @payload, NOW(), FALSE)
+            ON CONFLICT (request_id) DO UPDATE SET agent_key=EXCLUDED.agent_key, payload=EXCLUDED.payload, delivered=FALSE;
+            """;
+        cmd.Parameters.AddWithValue("id", request.RequestId);
+        cmd.Parameters.AddWithValue("agent", agentKey);
+        cmd.Parameters.AddWithValue("payload", JsonSerializer.Serialize(request, JsonOptions));
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<List<ResponseActionRequest>> TakePendingActionsAsync(string agentId)
+    {
+        await EnsurePendingTablesAsync();
+        await using var conn = new NpgsqlConnection(_cs);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            SELECT request_id, payload, agent_key FROM pending_actions
+            WHERE delivered=FALSE AND (agent_key=@a OR agent_key='broadcast')
+            ORDER BY created_at_utc ASC LIMIT 50;
+            """;
+        cmd.Parameters.AddWithValue("a", agentId);
+        var rows = new List<(string Id, string Payload, string Key)>();
+        await using (var reader = await cmd.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+                rows.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+        }
+
+        var result = new List<ResponseActionRequest>();
+        foreach (var (id, payload, key) in rows)
+        {
+            var req = JsonSerializer.Deserialize<ResponseActionRequest>(payload, JsonOptions);
+            if (req is null) continue;
+            result.Add(req);
+            if (!string.Equals(key, "broadcast", StringComparison.OrdinalIgnoreCase))
+            {
+                await using var mark = conn.CreateCommand();
+                mark.CommandText = "UPDATE pending_actions SET delivered=TRUE WHERE request_id=@id;";
+                mark.Parameters.AddWithValue("id", id);
+                await mark.ExecuteNonQueryAsync();
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<ResponseActionRequest?> GetPendingActionAsync(string requestId)
+    {
+        await EnsurePendingTablesAsync();
+        await using var conn = new NpgsqlConnection(_cs);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT payload FROM pending_actions WHERE request_id=@id LIMIT 1;";
+        cmd.Parameters.AddWithValue("id", requestId);
+        var o = await cmd.ExecuteScalarAsync();
+        return o is string json ? JsonSerializer.Deserialize<ResponseActionRequest>(json, JsonOptions) : null;
+    }
+
+    public async Task UpsertCampaignJsonAsync(string campaignId, string json)
+    {
+        await EnsurePendingTablesAsync();
+        await using var conn = new NpgsqlConnection(_cs);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            INSERT INTO threat_campaigns(campaign_id, payload, last_seen_utc)
+            VALUES (@id, @p, NOW())
+            ON CONFLICT (campaign_id) DO UPDATE SET payload=EXCLUDED.payload, last_seen_utc=NOW();
+            """;
+        cmd.Parameters.AddWithValue("id", campaignId);
+        cmd.Parameters.AddWithValue("p", json);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<IReadOnlyList<(string Id, string Json)>> ListCampaignJsonAsync(int take)
+    {
+        await EnsurePendingTablesAsync();
+        await using var conn = new NpgsqlConnection(_cs);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT campaign_id, payload FROM threat_campaigns ORDER BY last_seen_utc DESC LIMIT @n;";
+        cmd.Parameters.AddWithValue("n", Math.Clamp(take, 1, 500));
+        var list = new List<(string, string)>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            list.Add((reader.GetString(0), reader.GetString(1)));
+        return list;
+    }
+
+    private async Task EnsurePendingTablesAsync()
+    {
+        try
+        {
+            await using var conn = new NpgsqlConnection(_cs);
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                CREATE TABLE IF NOT EXISTS pending_actions (
+                    request_id TEXT PRIMARY KEY,
+                    agent_key TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    delivered BOOLEAN NOT NULL DEFAULT FALSE
+                );
+                CREATE TABLE IF NOT EXISTS threat_campaigns (
+                    campaign_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    last_seen_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch
+        {
+            // DB may be offline; callers will surface errors
+        }
+    }
 }

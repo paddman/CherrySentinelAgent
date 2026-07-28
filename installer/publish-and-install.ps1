@@ -34,7 +34,9 @@ if (Test-Path $ico) { Copy-Item $ico artifacts\agent-win-x64\ -Force }
 
 Write-Host "Publishing Dashboard..."
 dotnet publish src\CherrySentinel.Dashboard\CherrySentinel.Dashboard.csproj `
-  -c Release -r win-x64 --self-contained false `
+  -c Release -r win-x64 --self-contained true `
+  -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true `
   -o artifacts\dashboard-win-x64
 if (Test-Path $ico) {
     Copy-Item $ico artifacts\dashboard-win-x64\ -Force

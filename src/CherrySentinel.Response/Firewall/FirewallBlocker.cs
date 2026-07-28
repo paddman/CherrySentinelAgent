@@ -25,24 +25,117 @@ public sealed class FirewallBlocker
         ValidateRuleName(ruleName);
 
         var dir = direction.Equals("out", StringComparison.OrdinalIgnoreCase) ? "out" : "in";
-        var remote = dir == "in" ? $"remoteip={ip}" : $"remoteip={ip}";
         var args =
-            $"advfirewall firewall add rule name=\"{ruleName}\" dir={dir} action=block {remote} enable=yes protocol=any";
+            $"advfirewall firewall add rule name=\"{ruleName}\" dir={dir} action=block remoteip={ip} enable=yes protocol=any";
 
         var before = GetRule(ruleName);
         var (code, output) = RunNetsh(args);
-        var after = GetRule(ruleName);
 
         return new FirewallChangeResult
         {
             Success = code == 0,
             BeforeState = before ?? "absent",
-            Result = code == 0 ? $"blocked {ip} dir={dir}" : output,
+            Result = code == 0 ? $"blocked IP {ip} dir={dir} ({reason})" : output,
             RollbackCommand = $"netsh advfirewall firewall delete rule name=\"{ruleName}\"",
-            Error = code == 0 ? null : output
+            Error = code == 0 ? null : output,
+            RuleName = ruleName
         };
     }
 
+    /// <summary>
+    /// Block traffic by port. localPort = this host's port; remotePort = peer port.
+    /// action block + dir in/out.
+    /// </summary>
+    public FirewallChangeResult BlockPort(
+        string direction,
+        string protocol,
+        int? localPort,
+        int? remotePort,
+        string? remoteIp,
+        string ruleName,
+        string reason)
+    {
+        ValidateDirection(direction);
+        ValidateRuleName(ruleName);
+        var proto = NormalizeProtocol(protocol);
+        var dir = direction.Equals("out", StringComparison.OrdinalIgnoreCase) ? "out" : "in";
+
+        if (localPort is null && remotePort is null)
+        {
+            throw new ArgumentException("localPort or remotePort required for port block.");
+        }
+
+        if (localPort is < 1 or > 65535 || remotePort is < 1 or > 65535)
+        {
+            throw new ArgumentException("Port must be 1-65535.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(remoteIp))
+        {
+            ValidateIp(remoteIp);
+        }
+
+        var parts = new StringBuilder();
+        parts.Append($"advfirewall firewall add rule name=\"{ruleName}\" dir={dir} action=block protocol={proto} enable=yes");
+        if (localPort is not null)
+        {
+            parts.Append($" localport={localPort.Value}");
+        }
+
+        if (remotePort is not null)
+        {
+            parts.Append($" remoteport={remotePort.Value}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(remoteIp))
+        {
+            parts.Append($" remoteip={remoteIp}");
+        }
+
+        var before = GetRule(ruleName);
+        var (code, output) = RunNetsh(parts.ToString());
+        return new FirewallChangeResult
+        {
+            Success = code == 0,
+            BeforeState = before ?? "absent",
+            Result = code == 0
+                ? $"blocked port local={localPort} remote={remotePort} proto={proto} dir={dir} ip={remoteIp ?? "*"} ({reason})"
+                : output,
+            RollbackCommand = $"netsh advfirewall firewall delete rule name=\"{ruleName}\"",
+            Error = code == 0 ? null : output,
+            RuleName = ruleName
+        };
+    }
+
+    /// <summary>Open (allow) a local port — typically inbound for a service.</summary>
+    public FirewallChangeResult OpenPort(string direction, string protocol, int localPort, string ruleName, string reason)
+    {
+        ValidateDirection(direction);
+        ValidateRuleName(ruleName);
+        if (localPort is < 1 or > 65535)
+        {
+            throw new ArgumentException("Port must be 1-65535.");
+        }
+
+        var proto = NormalizeProtocol(protocol);
+        var dir = direction.Equals("out", StringComparison.OrdinalIgnoreCase) ? "out" : "in";
+        var args =
+            $"advfirewall firewall add rule name=\"{ruleName}\" dir={dir} action=allow protocol={proto} localport={localPort} enable=yes";
+
+        var before = GetRule(ruleName);
+        var (code, output) = RunNetsh(args);
+        return new FirewallChangeResult
+        {
+            Success = code == 0,
+            BeforeState = before ?? "absent",
+            Result = code == 0 ? $"opened port {localPort}/{proto} dir={dir} ({reason})" : output,
+            RollbackCommand = $"netsh advfirewall firewall delete rule name=\"{ruleName}\"",
+            Error = code == 0 ? null : output,
+            RuleName = ruleName
+        };
+    }
+
+    /// <summary>Close = delete matching CSA rule (allow or block).</summary>
     public FirewallChangeResult RemoveRule(string ruleName)
     {
         ValidateRuleName(ruleName);
@@ -52,12 +145,33 @@ public sealed class FirewallBlocker
         {
             Success = code == 0 || output.Contains("No rules match", StringComparison.OrdinalIgnoreCase),
             BeforeState = before,
-            Result = code == 0 ? "removed" : output,
+            Result = code == 0 ? "rule removed (port closed / unblock)" : output,
             RollbackCommand = before != "absent"
                 ? $"# re-add previous rule manually: {before}"
                 : string.Empty,
-            Error = code == 0 ? null : output
+            Error = code == 0 ? null : output,
+            RuleName = ruleName
         };
+    }
+
+    private static string NormalizeProtocol(string? protocol)
+    {
+        if (string.IsNullOrWhiteSpace(protocol) || protocol.Equals("any", StringComparison.OrdinalIgnoreCase))
+        {
+            return "any";
+        }
+
+        if (protocol.Equals("tcp", StringComparison.OrdinalIgnoreCase))
+        {
+            return "TCP";
+        }
+
+        if (protocol.Equals("udp", StringComparison.OrdinalIgnoreCase))
+        {
+            return "UDP";
+        }
+
+        throw new ArgumentException("Protocol must be tcp, udp, or any.");
     }
 
     public string CaptureFirewallStatus()
@@ -149,4 +263,5 @@ public sealed class FirewallChangeResult
     public string Result { get; init; } = string.Empty;
     public string RollbackCommand { get; init; } = string.Empty;
     public string? Error { get; init; }
+    public string? RuleName { get; init; }
 }

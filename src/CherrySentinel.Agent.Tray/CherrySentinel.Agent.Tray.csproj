@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>CherrySentinel.Agent.Tray</RootNamespace>
+    <AssemblyName>CherrySentinel.Agent.Tray</AssemblyName>
+    <ApplicationIcon>..\..\assets\icons\CherrySentinel.ico</ApplicationIcon>
+    <Product>Cherry Sentinel Agent Tray</Product>
+    <Description>System tray status icon for Cherry Sentinel Agent</Description>
+
+    <!-- RID set at publish time (win-x64 self-contained for endpoints). -->
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\assets\icons\CherrySentinel.ico" Link="CherrySentinel.ico" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\assets\icons\CherrySentinel.ico')" />
+  </ItemGroup>
+</Project>

@@ -6,5 +6,6 @@ public interface ITransportClient
 {
     Task<bool> IsReachableAsync(CancellationToken cancellationToken);
     Task<IngestResponse?> SendBatchAsync(AgentIngestBatch batch, CancellationToken cancellationToken);
-    Task SendHeartbeatAsync(AgentHeartbeat heartbeat, CancellationToken cancellationToken);
+    /// <summary>Returns heartbeat response including pending approved actions from Central.</summary>
+    Task<HeartbeatResponse?> SendHeartbeatAsync(AgentHeartbeat heartbeat, CancellationToken cancellationToken);
 }

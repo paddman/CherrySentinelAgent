@@ -10,6 +10,18 @@ param(
 $ErrorActionPreference = "Stop"
 Write-Host "== Cherry Sentinel Agent Uninstall ==" -ForegroundColor Cyan
 
+# Kill tray + agent processes first so uninstall can delete files
+$stopHelper = Join-Path $PSScriptRoot "setup-helpers\stop-agent-for-upgrade.ps1"
+if (Test-Path $stopHelper) {
+    & $stopHelper -ServiceName $ServiceName -InstallDir $InstallDir
+} else {
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    foreach ($n in @("CherrySentinel.Agent", "CherrySentinel.Agent.Tray")) {
+        Get-Process -Name $n -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        & taskkill.exe /F /IM "$n.exe" /T 2>$null | Out-Null
+    }
+}
+
 $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($svc) {
     if ($svc.Status -ne 'Stopped') {
@@ -20,6 +32,8 @@ if ($svc) {
     Start-Sleep -Seconds 2
     Write-Host "Service removed: $ServiceName"
 }
+
+Get-Process -Name "CherrySentinel.Agent.Tray" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 if (Test-Path $InstallDir) {
     Remove-Item -Path $InstallDir -Recurse -Force

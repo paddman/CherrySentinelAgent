@@ -1,0 +1,15 @@
+[Unit]
+Description=Cherry Sentinel Linux Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/opt/cherrysentinel/agent/CherrySentinel.Agent.Linux
+WorkingDirectory=/opt/cherrysentinel/agent
+Restart=always
+RestartSec=5
+Environment=DOTNET_ENVIRONMENT=Production
+
+[Install]
+WantedBy=multi-user.target
