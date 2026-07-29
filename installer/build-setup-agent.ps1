@@ -12,7 +12,8 @@
 param(
     [switch]$SkipPublish,
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.12"
+    # Empty = auto from Directory.Build.props (must match Agent ProductVersion)
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +23,17 @@ if (-not (Test-Path (Join-Path $Root "CherrySentinel.sln"))) {
 }
 Set-Location $Root
 $env:Path = "C:\Program Files\dotnet;" + $env:Path
+
+# Keep Setup filename version == assembly ProductVersion (avoid 1.0.20 setup shipping 1.0.16 binary)
+if (-not $Version) {
+    $props = Get-Content (Join-Path $Root "Directory.Build.props") -Raw
+    if ($props -match '<Version>([^<]+)</Version>') {
+        $Version = $Matches[1].Trim()
+    } else {
+        $Version = "1.0.0"
+    }
+}
+Write-Host "Setup/Product Version: $Version" -ForegroundColor Green
 
 function Find-ISCC {
     $candidates = @(

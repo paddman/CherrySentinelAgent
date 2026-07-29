@@ -9,9 +9,10 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$AgentVersion = "1.0.11",
-    [string]$CentralVersion = "1.0.3",
-    [string]$FullVersion = "1.0.6",
+    # Empty = use Directory.Build.props Version for ALL packages (recommended)
+    [string]$AgentVersion = "",
+    [string]$CentralVersion = "",
+    [string]$FullVersion = "",
     [switch]$SkipFull
 )
 
@@ -22,6 +23,15 @@ if (-not (Test-Path (Join-Path $Root "CherrySentinel.sln"))) {
 }
 Set-Location $Root
 $env:Path = "C:\Program Files\dotnet;" + $env:Path
+
+# Single product version — Setup names match binary ProductVersion
+$productVersion = "1.0.0"
+$props = Get-Content (Join-Path $Root "Directory.Build.props") -Raw
+if ($props -match '<Version>([^<]+)</Version>') { $productVersion = $Matches[1].Trim() }
+if (-not $AgentVersion) { $AgentVersion = $productVersion }
+if (-not $CentralVersion) { $CentralVersion = $productVersion }
+if (-not $FullVersion) { $FullVersion = $productVersion }
+Write-Host "Product version: $productVersion  (Agent=$AgentVersion Central=$CentralVersion Full=$FullVersion)" -ForegroundColor Green
 
 Write-Host "Stopping services/processes that lock publish outputs..." -ForegroundColor DarkYellow
 Stop-Service CherrySentinelAgent,CherrySentinelCentral -Force -ErrorAction SilentlyContinue

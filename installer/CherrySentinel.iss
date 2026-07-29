@@ -4,7 +4,7 @@
 
 #define MyAppName "Cherry Sentinel"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.10"
+  #define MyAppVersion "1.1.0"
 #endif
 #define MyAppPublisher "CherryDeskX"
 #define MyAppURL "https://github.com/cherrysentinel"
@@ -89,9 +89,10 @@ Name: "dashboard"; Description: "Desktop Dashboard (live UI + Firewall panel)"; 
 [Tasks]
 Name: "desktopicon"; Description: "Create desktop icon (Dashboard)"; GroupDescription: "Icons:"; Components: dashboard; Flags: checkedonce
 Name: "desktopcentral"; Description: "Create desktop icon (Central info)"; GroupDescription: "Icons:"; Components: central; Flags: checkedonce
-Name: "startcentral"; Description: "Start Central service after install"; GroupDescription: "Central:"; Components: central; Flags: checkedonce
-Name: "startagent"; Description: "Start Agent service after install"; GroupDescription: "Agent:"; Components: agent; Flags: checkedonce
-Name: "trayicon"; Description: "Show Agent tray icon + mini dashboard"; GroupDescription: "Agent:"; Components: agent; Flags: checkedonce
+; Default checked (omit checkedonce) so silent re-upgrade still starts services
+Name: "startcentral"; Description: "Start Central service after install"; GroupDescription: "Central:"; Components: central
+Name: "startagent"; Description: "Start Agent service after install"; GroupDescription: "Agent:"; Components: agent
+Name: "trayicon"; Description: "Show Agent tray icon + mini dashboard"; GroupDescription: "Agent:"; Components: agent
 Name: "openfirewall"; Description: "Open Windows Firewall for Central (7443 TCP + 5514 UDP)"; GroupDescription: "Central:"; Components: central; Flags: checkedonce
 
 [Files]
@@ -106,6 +107,8 @@ Source: "{#SourceRoot}\config\signatures\opensource-signatures.json"; DestDir: "
 Source: "{#SourceRoot}\installer\setup-helpers\register-central-service.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: central
 Source: "{#SourceRoot}\installer\setup-helpers\unregister-central-service.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: central
 Source: "{#SourceRoot}\installer\setup-helpers\stop-central-for-upgrade.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: central
+Source: "{#SourceRoot}\installer\setup-helpers\write-connection-info.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: central
+Source: "{#SourceRoot}\installer\setup-helpers\regenerate-central-cert.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: central
 Source: "{#SourceRoot}\installer\setup-helpers\stop-central-for-upgrade.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 
 ; ---- Agent ----
@@ -119,6 +122,7 @@ Source: "{#SourceRoot}\installer\setup-helpers\unregister-agent-service.ps1"; De
 Source: "{#SourceRoot}\installer\setup-helpers\register-agent-tray.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: agent
 Source: "{#SourceRoot}\installer\setup-helpers\unregister-agent-tray.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: agent
 Source: "{#SourceRoot}\installer\setup-helpers\stop-agent-for-upgrade.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: agent
+Source: "{#SourceRoot}\installer\setup-helpers\verify-agent-install.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: agent
 Source: "{#SourceRoot}\installer\setup-helpers\set-agent-central-url.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: agent
 Source: "{#SourceRoot}\installer\templates\Set-Agent-Server.cmd"; DestDir: "{app}\Installer"; Flags: ignoreversion; Components: agent
 Source: "{#SourceRoot}\installer\setup-helpers\stop-agent-for-upgrade.ps1"; DestDir: "{tmp}"; Flags: dontcopy
@@ -150,8 +154,8 @@ Name: "{autodesktop}\Cherry Sentinel Central"; Filename: "{app}\Central\Open-Cen
 [Run]
 ; 1) Central first (so Agent can point to localhost)
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Installer\register-central-service.ps1"" -InstallDir ""{app}\Central"" -DataDir ""{commonappdata}\CherrySentinel\Server"" -ServiceName ""CherrySentinelCentral"" -StartService {code:StartCentralFlag} -Port ""{code:GetCentralPort}"""; \
-  StatusMsg: "Registering Central Server..."; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Installer\register-central-service.ps1"" -InstallDir ""{app}\Central"" -DataDir ""{commonappdata}\CherrySentinel\Server"" -ServiceName ""CherrySentinelCentral"" -StartService {code:StartCentralFlag} -Port ""{code:GetCentralPort}"" -PublicHost ""{code:GetCentralHost}"" -TrustCertificate ""1"" -RegenerateCertificate ""1"""; \
+  StatusMsg: "Registering Central Server + HTTPS certificate..."; \
   Flags: runhidden waituntilterminated; \
   Components: central
 
@@ -166,6 +170,12 @@ Filename: "powershell.exe"; \
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Installer\register-agent-service.ps1"" -InstallDir ""{app}\Agent"" -DataDir ""{commonappdata}\CherrySentinel\Agent"" -ServiceName ""CherrySentinelAgent"" -StartService {code:StartAgentFlag} -CentralUrl ""{code:GetCentralUrl}"""; \
   StatusMsg: "Registering Agent service (pointing at Central)..."; \
+  Flags: runhidden waituntilterminated; \
+  Components: agent
+
+Filename: "powershell.exe"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Installer\verify-agent-install.ps1"" -InstallDir ""{app}\Agent"" -ServiceName ""CherrySentinelAgent"" -MinVersion ""{#MyAppVersion}"""; \
+  StatusMsg: "Verifying Agent binary version..."; \
   Flags: runhidden waituntilterminated; \
   Components: agent
 

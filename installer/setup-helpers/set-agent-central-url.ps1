@@ -34,7 +34,8 @@ param(
     [switch]$EnableSyslog,
     [string]$SyslogHost = "",
     [int]$SyslogPort = 5514,
-    [switch]$AllowUntrustedServerCertificate
+    [switch]$AllowUntrustedServerCertificate,
+    [string]$EnrollmentToken = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -135,6 +136,18 @@ if (-not $ServerHost) {
     } catch { }
 }
 
+# Pull enrollment token from shared connection file if not provided
+if (-not $EnrollmentToken -and (Test-Path "C:\ProgramData\CherrySentinel\connection.json")) {
+    try {
+        $c = Get-Content "C:\ProgramData\CherrySentinel\connection.json" -Raw | ConvertFrom-Json
+        if ($c.EnrollmentToken) { $EnrollmentToken = [string]$c.EnrollmentToken }
+        if (($CentralUrl -match 'localhost|127\.0\.0\.1') -and $c.RemoteUrl -and -not (Get-Service CherrySentinelCentral -ErrorAction SilentlyContinue)) {
+            $CentralUrl = [string]$c.RemoteUrl
+            Write-Host "NOTE: using RemoteUrl from connection.json: $CentralUrl" -ForegroundColor Yellow
+        }
+    } catch { }
+}
+
 $json = Get-Content $appsettings -Raw | ConvertFrom-Json
 if (-not $json.Server) {
     $json | Add-Member -NotePropertyName Server -NotePropertyValue ([pscustomobject]@{ Url = $CentralUrl }) -Force
@@ -142,9 +155,11 @@ if (-not $json.Server) {
     $json.Server.Url = $CentralUrl
 }
 
-# Lab/self-signed certs: default allow when not already set
-if ($AllowUntrustedServerCertificate -or -not ($json.Server.PSObject.Properties.Name -contains 'AllowUntrustedServerCertificate')) {
-    $json.Server | Add-Member -NotePropertyName AllowUntrustedServerCertificate -NotePropertyValue $true -Force
+# Self-signed Central cert — always on for separate installs unless explicitly disabled later
+$json.Server | Add-Member -NotePropertyName AllowUntrustedServerCertificate -NotePropertyValue $true -Force
+if ($EnrollmentToken) {
+    $json.Server | Add-Member -NotePropertyName EnrollmentToken -NotePropertyValue $EnrollmentToken -Force
+    Write-Host "OK: EnrollmentToken set" -ForegroundColor Green
 }
 
 if ($EnableSyslog) {
@@ -157,7 +172,11 @@ if ($EnableSyslog) {
 
 $json | ConvertTo-Json -Depth 12 | Set-Content $appsettings -Encoding UTF8
 Write-Host "OK: Server.Url = $CentralUrl" -ForegroundColor Green
+Write-Host "    AllowUntrustedServerCertificate = true"
 Write-Host "    File: $appsettings"
+if ($CentralUrl -match 'localhost|127\.0\.0\.1') {
+    Write-Warning "URL is localhost — only works if Central is on THIS PC. Remote agents need LAN IP."
+}
 
 if (-not $NoRestart) {
     $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue

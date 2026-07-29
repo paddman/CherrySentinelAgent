@@ -22,6 +22,19 @@ public sealed class SecurityOptions
     public bool EnableMtls { get; set; }
     public string? CertificatePath { get; set; }
     public string? CertificatePassword { get; set; }
+
+    /// <summary>
+    /// Extra DNS names / IPs for the self-signed HTTPS cert SAN (comma-separated).
+    /// Use for public/NAT IP e.g. "180.180.243.82,sentinel.example.com".
+    /// </summary>
+    public string? CertificateExtraSans { get; set; }
+
+    /// <summary>Alias for a single public host/IP (same as CertificateExtraSans).</summary>
+    public string? PublicHost { get; set; }
+
+    /// <summary>When true, delete and recreate central.pfx on next boot.</summary>
+    public bool RegenerateCertificate { get; set; }
+
     public long MaxRequestBodyBytes { get; set; } = 20 * 1024 * 1024;
 
     /// <summary>When true, reject heartbeats from agents that report unsigned binary.</summary>

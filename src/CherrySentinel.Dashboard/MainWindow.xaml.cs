@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
@@ -19,17 +18,17 @@ public partial class MainWindow : Window
 {
     private CentralApiClient _api;
     private readonly DispatcherTimer _autoRefresh;
-    private readonly DispatcherTimer _deadlineTimer;
     private List<Incident> _incidents = [];
     private List<ThreatCampaign> _campaigns = [];
     private readonly Dictionary<string, FrameworkElement> _pages;
     private readonly Dictionary<string, Button> _navButtons;
-    private readonly ObservableCollection<string> _pendingSubtasks = new();
-    private readonly ObservableCollection<DeadlineTaskRow> _deadlineTasks = new();
 
     public ObservableCollection<ResponseActionRow> Actions { get; } = new();
     public ObservableCollection<ResponseActionRow> FwSessionActions { get; } = new();
+    public ObservableCollection<ResponseActionRow> SvcSessionActions { get; } = new();
     private List<AgentRow> _agents = [];
+    private string? _selectedAgentId;
+    private string? _selectedAgentName;
 
     public MainWindow()
     {
@@ -38,32 +37,28 @@ public partial class MainWindow : Window
         SettingsUrlBox.Text = ServerUrlBox.Text;
         ActionsGrid.ItemsSource = Actions;
         FwActionsGrid.ItemsSource = FwSessionActions;
-        PendingSubtasksList.ItemsSource = _pendingSubtasks;
-        DeadlineTasksGrid.ItemsSource = _deadlineTasks;
-        DeadlineDatePicker.SelectedDate = DateTime.Today;
-        UpdatePendingSubtaskHint();
-        RefreshDeadlineEmptyState();
+        SvcActionsGrid.ItemsSource = SvcSessionActions;
 
         _pages = new(StringComparer.OrdinalIgnoreCase)
         {
             ["Dashboard"] = PageDashboard,
-            ["Deadline"] = PageDeadline,
             ["Incidents"] = PageIncidents,
             ["Paths"] = PagePaths,
             ["Agents"] = PageAgents,
             ["Catalog"] = PageCatalog,
             ["Firewall"] = PageFirewall,
+            ["Services"] = PageServices,
             ["Settings"] = PageSettings
         };
         _navButtons = new(StringComparer.OrdinalIgnoreCase)
         {
             ["Dashboard"] = NavDashboard,
-            ["Deadline"] = NavDeadline,
             ["Incidents"] = NavIncidents,
             ["Paths"] = NavPaths,
             ["Agents"] = NavEndpoints,
             ["Catalog"] = NavRules,
             ["Firewall"] = NavFirewall,
+            ["Services"] = NavServices,
             ["Settings"] = NavSettings
         };
 
@@ -80,10 +75,6 @@ public partial class MainWindow : Window
         _autoRefresh = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _autoRefresh.Tick += async (_, _) => await RefreshAsync(silent: true);
         _autoRefresh.Start();
-        _deadlineTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _deadlineTimer.Tick += (_, _) => UpdateDeadlineCountdowns();
-        _deadlineTimer.Start();
-        UpdateDeadlineCountdowns();
         Loaded += async (_, _) => await RefreshAsync();
         ShowPage("Dashboard");
     }
@@ -285,128 +276,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void AddSubtask_Click(object sender, RoutedEventArgs e)
-    {
-        var text = DeadlineSubtaskBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            MessageBox.Show(this, "กรุณากรอกชื่อ subtask ก่อนเพิ่ม", "Deadline Countdown",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            DeadlineSubtaskBox.Focus();
-            return;
-        }
-
-        _pendingSubtasks.Add(text);
-        DeadlineSubtaskBox.Clear();
-        UpdatePendingSubtaskHint();
-        DeadlineSubtaskBox.Focus();
-    }
-
-    private void RemoveSubtask_Click(object sender, RoutedEventArgs e)
-    {
-        if (PendingSubtasksList.SelectedItem is not string selected) return;
-        _pendingSubtasks.Remove(selected);
-        UpdatePendingSubtaskHint();
-    }
-
-    private void AddDeadlineTask_Click(object sender, RoutedEventArgs e)
-    {
-        var taskName = DeadlineTaskNameBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(taskName))
-        {
-            MessageBox.Show(this, "กรุณากรอกชื่องาน", "Deadline Countdown",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            DeadlineTaskNameBox.Focus();
-            return;
-        }
-
-        if (_pendingSubtasks.Count == 0)
-        {
-            MessageBox.Show(this, "กรุณาเพิ่ม subtask อย่างน้อย 1 รายการ", "Deadline Countdown",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            DeadlineSubtaskBox.Focus();
-            return;
-        }
-
-        if (!TryReadDeadline(out var deadline, out var error))
-        {
-            MessageBox.Show(this, error, "Deadline Countdown",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-            DeadlineTimeBox.Focus();
-            return;
-        }
-
-        var row = new DeadlineTaskRow(taskName, deadline, _pendingSubtasks.ToList());
-        _deadlineTasks.Add(row);
-        DeadlineTasksGrid.SelectedItem = row;
-        _pendingSubtasks.Clear();
-        DeadlineTaskNameBox.Clear();
-        DeadlineSubtaskBox.Clear();
-        UpdatePendingSubtaskHint();
-        UpdateDeadlineCountdowns();
-    }
-
-    private void RemoveDeadlineTask_Click(object sender, RoutedEventArgs e)
-    {
-        if (DeadlineTasksGrid.SelectedItem is not DeadlineTaskRow selected) return;
-        _deadlineTasks.Remove(selected);
-        RefreshDeadlineEmptyState();
-    }
-
-    private bool TryReadDeadline(out DateTimeOffset deadline, out string error)
-    {
-        deadline = default;
-        error = "";
-        if (DeadlineDatePicker.SelectedDate is not DateTime date)
-        {
-            error = "กรุณาเลือกวัน deadline";
-            return false;
-        }
-
-        var timeText = DeadlineTimeBox.Text.Trim();
-        var formats = new[] { "H:mm", "HH:mm", "H:mm:ss", "HH:mm:ss" };
-        if (!DateTime.TryParseExact(timeText, formats, CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out var time))
-        {
-            error = "เวลาไม่ถูกต้อง ใช้รูปแบบ HH:mm หรือ HH:mm:ss เช่น 18:30:00";
-            return false;
-        }
-
-        var localDateTime = DateTime.SpecifyKind(date.Date.Add(time.TimeOfDay), DateTimeKind.Local);
-        deadline = new DateTimeOffset(localDateTime);
-        if (deadline <= DateTimeOffset.Now)
-        {
-            error = "deadline ต้องอยู่ในอนาคต";
-            return false;
-        }
-
-        return true;
-    }
-
-    private void UpdatePendingSubtaskHint()
-    {
-        PendingSubtaskHint.Text = _pendingSubtasks.Count == 0
-            ? "ยังไม่มี subtask"
-            : $"พร้อมเพิ่ม {_pendingSubtasks.Count} รายการ";
-    }
-
-    private void RefreshDeadlineEmptyState()
-    {
-        DeadlineEmptyText.Visibility = _deadlineTasks.Count == 0
-            ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private void UpdateDeadlineCountdowns()
-    {
-        var now = DateTimeOffset.Now;
-        DeadlineClockText.Text = $"เวลาเครื่อง: {now:HH:mm:ss}";
-        foreach (var task in _deadlineTasks)
-            task.UpdateCountdown(now);
-
-        DeadlineTasksGrid.Items.Refresh();
-        RefreshDeadlineEmptyState();
-    }
-
     private void ViewAllIncidents_Click(object sender, MouseButtonEventArgs e) => ShowPage("Incidents");
 
     private void Nav_Click(object sender, RoutedEventArgs e)
@@ -580,6 +449,7 @@ public partial class MainWindow : Window
         KpiAgents.Text = agents.Count.ToString();
         BindAgentsFleetKpis(agents);
         RefreshFirewallAgentList(agents);
+        RefreshServiceAgentList(agents);
         if (agents.Count > 0)
         {
             AgentsGrid.SelectedIndex = 0;
@@ -696,7 +566,135 @@ public partial class MainWindow : Window
     private async void AgentsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (AgentsGrid.SelectedItem is AgentRow row)
+        {
+            _selectedAgentId = row.AgentId;
+            _selectedAgentName = row.ComputerName;
             await ShowAgentDetailAsync(row);
+        }
+    }
+
+    private void SvcQuick_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string name })
+            SvcNameBox.Text = name;
+    }
+
+    private async void SvcStart_Click(object sender, RoutedEventArgs e) =>
+        await SubmitServiceActionAsync("StartService", SvcAgentBox.SelectedItem as AgentPick, SvcNameBox.Text, SvcReasonBox.Text);
+
+    private async void SvcStop_Click(object sender, RoutedEventArgs e) =>
+        await SubmitServiceActionAsync("StopService", SvcAgentBox.SelectedItem as AgentPick, SvcNameBox.Text, SvcReasonBox.Text);
+
+    private async void SvcRestart_Click(object sender, RoutedEventArgs e) =>
+        await SubmitServiceActionAsync("RestartService", SvcAgentBox.SelectedItem as AgentPick, SvcNameBox.Text, SvcReasonBox.Text);
+
+    private async void AgSvcStart_Click(object sender, RoutedEventArgs e) =>
+        await SubmitServiceActionFromDetailAsync("StartService");
+
+    private async void AgSvcStop_Click(object sender, RoutedEventArgs e) =>
+        await SubmitServiceActionFromDetailAsync("StopService");
+
+    private async void AgSvcRestart_Click(object sender, RoutedEventArgs e) =>
+        await SubmitServiceActionFromDetailAsync("RestartService");
+
+    private async Task SubmitServiceActionFromDetailAsync(string actionType)
+    {
+        if (string.IsNullOrWhiteSpace(_selectedAgentId))
+        {
+            MessageBox.Show(this, "Select an endpoint first.", "Services", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var pick = new AgentPick { AgentId = _selectedAgentId, ComputerName = _selectedAgentName ?? _selectedAgentId };
+        await SubmitServiceActionAsync(actionType, pick, AgSvcNameBox.Text, "From Endpoints detail panel");
+    }
+
+    private async Task SubmitServiceActionAsync(string actionType, AgentPick? pick, string? serviceName, string? reason)
+    {
+        serviceName = (serviceName ?? "").Trim();
+        if (pick is null)
+        {
+            MessageBox.Show(this, "Select a target Agent (must appear in Endpoints).", "Services",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(serviceName))
+        {
+            MessageBox.Show(this, "Enter a service / unit name (e.g. W3SVC or nginx).", "Services",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (serviceName.IndexOfAny(['"', ';', '&', '|', '\n', '\r']) >= 0)
+        {
+            MessageBox.Show(this, "Invalid characters in service name.", "Services",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            this,
+            $"{actionType}\nService: {serviceName}\nAgent: {pick.ComputerName} ({pick.AgentId})\n\n" +
+            "Queues an APPROVED action via Central. Agent runs it on next heartbeat.",
+            "Confirm service control",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes) return;
+
+        try
+        {
+            var req = new ResponseActionRequest
+            {
+                ActionType = actionType,
+                ServiceName = serviceName,
+                TargetAgentId = pick.AgentId,
+                Reason = string.IsNullOrWhiteSpace(reason) ? "Dashboard service control" : reason.Trim(),
+                Approved = true,
+                ApprovalId = Guid.NewGuid().ToString("N"),
+                RequestId = Guid.NewGuid().ToString("N"),
+                Requester = "dashboard-operator"
+            };
+
+            var (ok, msg, saved) = await _api.PostActionAsync(req);
+            var row = new ResponseActionRow(
+                DateTime.Now.ToString("HH:mm:ss"),
+                actionType,
+                serviceName,
+                $"{pick.ComputerName} / {pick.AgentId}",
+                ok ? "Queued→Agent" : "Failed");
+            SvcSessionActions.Insert(0, row);
+            Actions.Insert(0, new ResponseActionRow(row.Time, row.Action, row.Target, "Dashboard", ok ? "Queued" : "Failed"));
+
+            var status = ok
+                ? $"OK: {msg}. RequestId={saved?.RequestId ?? req.RequestId}. Applied on next agent heartbeat."
+                : $"FAILED: {msg}";
+            SvcStatusText.Text = status;
+            if (AgSvcStatusText is not null)
+                AgSvcStatusText.Text = status;
+            if (!ok)
+                MessageBox.Show(this, msg, "Service action failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        catch (Exception ex)
+        {
+            SvcStatusText.Text = "Error: " + ex.Message;
+            MessageBox.Show(this, ex.Message, "Services", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void RefreshServiceAgentList(List<AgentRow> agents)
+    {
+        var prev = (SvcAgentBox.SelectedItem as AgentPick)?.AgentId;
+        var picks = agents.Select(a => new AgentPick { AgentId = a.AgentId, ComputerName = a.ComputerName }).ToList();
+        SvcAgentBox.ItemsSource = picks;
+        if (picks.Count == 0)
+        {
+            SvcAgentBox.SelectedIndex = -1;
+            return;
+        }
+
+        var match = picks.FindIndex(p => p.AgentId == prev);
+        SvcAgentBox.SelectedIndex = match >= 0 ? match : 0;
     }
 
     private void ClearAgentDetail()
@@ -1037,7 +1035,6 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _autoRefresh.Stop();
-        _deadlineTimer.Stop();
         _api.Dispose();
         base.OnClosed(e);
     }
@@ -1108,39 +1105,67 @@ public partial class MainWindow : Window
             }
         }
 
-        public static AgentRow FromJson(JsonElement el, string status, DateTimeOffset lastSeen, bool online) => new()
+        public static AgentRow FromJson(JsonElement el, string status, DateTimeOffset lastSeen, bool online)
         {
-            AgentId = GetString(el, "agentId", "AgentId") ?? "?",
-            ComputerName = GetString(el, "computerName", "ComputerName") ?? "?",
-            HostIp = GetString(el, "hostIp", "HostIp"),
-            Version = GetString(el, "agentVersion", "AgentVersion", "Version"),
-            Status = status,
-            LastSeenUtc = lastSeen,
-            Online = online,
-            Platform = GetString(el, "platform", "Platform"),
-            CentralUrl = GetString(el, "centralUrl", "CentralUrl"),
-            LastError = GetString(el, "lastError", "LastError"),
-            OsVersion = GetString(el, "osVersion", "OsVersion"),
-            CpuPercent = GetDouble(el, "cpuPercent", "CpuPercent"),
-            MemUsedPercent = GetDouble(el, "memUsedPercent", "MemUsedPercent"),
-            DiskUsedPercent = GetDouble(el, "diskUsedPercent", "DiskUsedPercent"),
-            NetworkRxBytesPerSec = GetDouble(el, "networkRxBytesPerSec", "NetworkRxBytesPerSec"),
-            NetworkTxBytesPerSec = GetDouble(el, "networkTxBytesPerSec", "NetworkTxBytesPerSec"),
-            DiskReadBytesPerSec = GetDouble(el, "diskReadBytesPerSec", "DiskReadBytesPerSec"),
-            DiskWriteBytesPerSec = GetDouble(el, "diskWriteBytesPerSec", "DiskWriteBytesPerSec"),
-            LoadAverage1 = GetDouble(el, "loadAverage1", "LoadAverage1"),
-            QueueDepth = GetLong(el, "queueDepth", "QueueDepth"),
-            WorkingSetBytes = GetLong(el, "workingSetBytes", "WorkingSetBytes"),
-            DatabaseSizeBytes = GetLong(el, "databaseSizeBytes", "DatabaseSizeBytes"),
-            ClockSkewSeconds = GetDouble(el, "clockSkewSeconds", "ClockSkewSeconds") ?? 0,
-            BinarySha256 = GetString(el, "binarySha256", "BinarySha256"),
-            IsBinarySigned = GetBool(el, "isBinarySigned", "IsBinarySigned"),
-            PolicyVersion = GetInt(el, "policyVersion", "PolicyVersion"),
-            HostMemUsedBytes = GetLong(el, "hostMemUsedBytes", "HostMemUsedBytes") is long hu and > 0 ? hu : null,
-            HostMemTotalBytes = GetLong(el, "hostMemTotalBytes", "HostMemTotalBytes") is long ht and > 0 ? ht : null,
-            MetricsSummary = GetString(el, "metricsSummary", "MetricsSummary"),
-            OfflineSeconds = GetInt(el, "offlineSeconds", "OfflineSeconds") ?? 0
-        };
+            var cpu = GetDouble(el, "cpuPercent", "CpuPercent")
+                      ?? ParseMetricFromStatus(status, "cpu");
+            var mem = GetDouble(el, "memUsedPercent", "MemUsedPercent")
+                      ?? ParseMetricFromStatus(status, "mem");
+            var disk = GetDouble(el, "diskUsedPercent", "DiskUsedPercent")
+                       ?? ParseMetricFromStatus(status, "disk");
+            var summary = GetString(el, "metricsSummary", "MetricsSummary");
+            return new AgentRow
+            {
+                AgentId = GetString(el, "agentId", "AgentId") ?? "?",
+                ComputerName = GetString(el, "computerName", "ComputerName") ?? "?",
+                HostIp = GetString(el, "hostIp", "HostIp"),
+                Version = GetString(el, "agentVersion", "AgentVersion", "Version"),
+                Status = status,
+                LastSeenUtc = lastSeen,
+                Online = online,
+                Platform = GetString(el, "platform", "Platform"),
+                CentralUrl = GetString(el, "centralUrl", "CentralUrl"),
+                LastError = GetString(el, "lastError", "LastError"),
+                OsVersion = GetString(el, "osVersion", "OsVersion"),
+                CpuPercent = cpu,
+                MemUsedPercent = mem,
+                DiskUsedPercent = disk,
+                NetworkRxBytesPerSec = GetDouble(el, "networkRxBytesPerSec", "NetworkRxBytesPerSec"),
+                NetworkTxBytesPerSec = GetDouble(el, "networkTxBytesPerSec", "NetworkTxBytesPerSec"),
+                DiskReadBytesPerSec = GetDouble(el, "diskReadBytesPerSec", "DiskReadBytesPerSec"),
+                DiskWriteBytesPerSec = GetDouble(el, "diskWriteBytesPerSec", "DiskWriteBytesPerSec"),
+                LoadAverage1 = GetDouble(el, "loadAverage1", "LoadAverage1"),
+                QueueDepth = GetLong(el, "queueDepth", "QueueDepth"),
+                WorkingSetBytes = GetLong(el, "workingSetBytes", "WorkingSetBytes"),
+                DatabaseSizeBytes = GetLong(el, "databaseSizeBytes", "DatabaseSizeBytes"),
+                ClockSkewSeconds = GetDouble(el, "clockSkewSeconds", "ClockSkewSeconds") ?? 0,
+                BinarySha256 = GetString(el, "binarySha256", "BinarySha256"),
+                IsBinarySigned = GetBool(el, "isBinarySigned", "IsBinarySigned"),
+                PolicyVersion = GetInt(el, "policyVersion", "PolicyVersion"),
+                HostMemUsedBytes = GetLong(el, "hostMemUsedBytes", "HostMemUsedBytes") is long hu and > 0 ? hu : null,
+                HostMemTotalBytes = GetLong(el, "hostMemTotalBytes", "HostMemTotalBytes") is long ht and > 0 ? ht : null,
+                MetricsSummary = summary,
+                OfflineSeconds = GetInt(el, "offlineSeconds", "OfflineSeconds") ?? 0
+            };
+        }
+
+        /// <summary>Parse cpu=12.3% from Status/MetricsSummary lines (legacy heartbeats).</summary>
+        private static double? ParseMetricFromStatus(string? text, string key)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            var token = key + "=";
+            var idx = text.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return null;
+            var start = idx + token.Length;
+            var end = start;
+            while (end < text.Length && (char.IsDigit(text[end]) || text[end] is '.' or ','))
+                end++;
+            var num = text[start..end].Replace(',', '.');
+            if (double.TryParse(num, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var v))
+                return v;
+            return null;
+        }
 
         public static AgentRow FromInventory(AgentInventoryItem i) => new()
         {
@@ -1176,45 +1201,6 @@ public partial class MainWindow : Window
             OfflineSeconds = i.OfflineSeconds,
             History = i.MetricsHistory ?? []
         };
-    }
-
-    private sealed class DeadlineTaskRow
-    {
-        private readonly IReadOnlyList<string> _subtasks;
-
-        public DeadlineTaskRow(string taskName, DateTimeOffset deadline, IReadOnlyList<string> subtasks)
-        {
-            TaskName = taskName;
-            Deadline = deadline;
-            _subtasks = subtasks;
-            DeadlineText = deadline.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
-            SubtasksText = string.Join(Environment.NewLine,
-                _subtasks.Select((item, index) => $"{index + 1}. {item}"));
-            UpdateCountdown(DateTimeOffset.Now);
-        }
-
-        public string TaskName { get; }
-        public DateTimeOffset Deadline { get; }
-        public string DeadlineText { get; }
-        public string SubtasksText { get; }
-        public string CountdownText { get; private set; } = "";
-        public string StatusText { get; private set; } = "";
-
-        public void UpdateCountdown(DateTimeOffset now)
-        {
-            var remaining = Deadline - now;
-            if (remaining <= TimeSpan.Zero)
-            {
-                var overdue = TimeSpan.FromSeconds(Math.Floor(Math.Abs(remaining.TotalSeconds)));
-                CountdownText = $"เลยกำหนด {overdue.Days} วัน {overdue.Hours:00}:{overdue.Minutes:00}:{overdue.Seconds:00}";
-                StatusText = "หมดเวลา";
-                return;
-            }
-
-            var countdown = TimeSpan.FromSeconds(Math.Ceiling(remaining.TotalSeconds));
-            CountdownText = $"{countdown.Days} วัน {countdown.Hours:00}:{countdown.Minutes:00}:{countdown.Seconds:00}";
-            StatusText = "กำลังนับถอยหลัง";
-        }
     }
 
     private sealed class AgentPick

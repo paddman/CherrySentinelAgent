@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.ServiceProcess;
 
 namespace CherrySentinel.Agent.Tray;
 
@@ -228,6 +229,71 @@ internal sealed class MiniDashboardForm : Form
         infoCard.Controls.Add(editCentral);
         y += 160;
 
+        // Local service control (this PC)
+        var svcCard = MakeCard(body, 12, y, body.ClientSize.Width - 28, 96);
+        svcCard.Controls.Add(new Label
+        {
+            Text = "Service control (this PC)",
+            Font = new Font("Segoe UI Semibold", 9f),
+            ForeColor = Navy,
+            AutoSize = true,
+            Location = new Point(12, 10)
+        });
+        var svcBtnW = (svcCard.Width - 36) / 3;
+        var startA = new Button
+        {
+            Text = "Start Agent",
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Success,
+            ForeColor = Color.White,
+            Size = new Size(svcBtnW, 28),
+            Location = new Point(12, 36),
+            Cursor = Cursors.Hand
+        };
+        startA.FlatAppearance.BorderSize = 0;
+        startA.Click += (_, _) => ControlLocalAgent("start");
+        var stopA = new Button
+        {
+            Text = "Stop Agent",
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Danger,
+            ForeColor = Color.White,
+            Size = new Size(svcBtnW, 28),
+            Location = new Point(18 + svcBtnW, 36),
+            Cursor = Cursors.Hand
+        };
+        stopA.FlatAppearance.BorderSize = 0;
+        stopA.Click += (_, _) => ControlLocalAgent("stop");
+        var more = new Button
+        {
+            Text = "More…",
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Brand,
+            ForeColor = Color.White,
+            Size = new Size(svcBtnW, 28),
+            Location = new Point(24 + 2 * svcBtnW, 36),
+            Cursor = Cursors.Hand
+        };
+        more.FlatAppearance.BorderSize = 0;
+        more.Click += (_, _) =>
+        {
+            using var dlg = new ServiceControlForm();
+            dlg.ShowDialog(this);
+            RefreshUi();
+        };
+        svcCard.Controls.Add(startA);
+        svcCard.Controls.Add(stopA);
+        svcCard.Controls.Add(more);
+        svcCard.Controls.Add(new Label
+        {
+            Text = "Start/Stop CherrySentinelAgent · More = any Windows service",
+            ForeColor = Muted,
+            Font = new Font("Segoe UI", 7.5f),
+            AutoSize = true,
+            Location = new Point(12, 70)
+        });
+        y += 108;
+
         // KPI row
         var kpiW = (body.ClientSize.Width - 28 - 18) / 2;
         var k1 = MakeCard(body, 12, y, kpiW, 72);
@@ -341,6 +407,12 @@ internal sealed class MiniDashboardForm : Form
             using var pen = new Pen(Color.FromArgb(220, 229, 242), 1);
             e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
         };
+    }
+
+    private void ControlLocalAgent(string action)
+    {
+        AgentServiceHelper.Control(action, _installDir, this);
+        RefreshUi();
     }
 
     private static Panel MakeCard(Control parent, int x, int y, int w, int h)

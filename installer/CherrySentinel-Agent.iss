@@ -12,7 +12,7 @@
 
 #define MyAppName "Cherry Sentinel Agent"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.12"
+  #define MyAppVersion "1.1.0"
 #endif
 #define MyAppPublisher "CherryDeskX"
 #define MyAppURL "https://github.com/cherrysentinel"
@@ -69,7 +69,7 @@ WelcomeLabel1=Cherry Sentinel Agent Setup
 WelcomeLabel2=ยินดีต้อนรับสู่ตัวติดตั้ง Agent แยก (endpoint only)%n%nติดตั้ง Windows Service บนเครื่องเป้าหมาย — ตรวจจับ password spray, lateral movement และ process ผิดปกติ%n%nAgent จะส่งข้อมูลไปที่ Central Server (ไม่เชื่อม Dashboard โดยตรง)%n%nThis installs the monitoring Agent only. Configure Central URL on the next page so telemetry appears in the Dashboard.
 FinishedHeadingLabel=ติดตั้ง Agent สำเร็จ
 FinishedLabelNoIcons=Cherry Sentinel Agent ติดตั้งเรียบร้อยแล้ว!
-FinishedLabel=Cherry Sentinel Agent ติดตั้งเรียบร้อยแล้ว!%n%nService: CherrySentinelAgent%n%nตรวจว่า Central Server ทำงานอยู่ แล้วเปิด Dashboard ชี้ URL เดียวกัน
+FinishedLabel=Cherry Sentinel Agent ติดตั้งเรียบร้อยแล้ว!%n%nService: CherrySentinelAgent%n%nตรวจเวอร์ชัน: เปิด %ProgramFiles%\Cherry Sentinel Agent\VERSION.txt%nหรือ status.json ต้องเป็น {#MyAppVersion}%n%nตรวจว่า Central ทำงาน แล้วเปิด Dashboard ชี้ URL เดียวกัน
 ClickFinish=คลิก Finish เพื่อปิดตัวติดตั้ง
 ButtonNext=Next >
 ButtonBack=< Back
@@ -82,9 +82,10 @@ WizardInstalling=กำลังติดตั้ง...
 StatusExtractFiles=กำลังติดตั้งไฟล์...
 
 [Tasks]
-Name: "startservice"; Description: "Start Agent service after install"; GroupDescription: "Service:"; Flags: checkedonce
-Name: "trayicon"; Description: "Show small Agent icon in system tray (notification area)"; GroupDescription: "Tray:"; Flags: checkedonce
-Name: "desktopicon"; Description: "Create a &desktop icon (tray / mini dashboard)"; GroupDescription: "Additional icons:"; Flags: checkedonce
+; Default = checked (no checkedonce). checkedonce is unchecked on reinstall → service left Stopped.
+Name: "startservice"; Description: "Start Agent service after install"; GroupDescription: "Service:"
+Name: "trayicon"; Description: "Show small Agent icon in system tray (notification area)"; GroupDescription: "Tray:"
+Name: "desktopicon"; Description: "Create a &desktop icon (tray / mini dashboard)"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
 ; Pre-install kill helper (extracted to {tmp} before copy — used by PrepareToInstall)
@@ -103,6 +104,7 @@ Source: "{#SourceRoot}\installer\setup-helpers\set-agent-central-url.ps1"; DestD
 Source: "{#SourceRoot}\installer\setup-helpers\register-agent-tray.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion
 Source: "{#SourceRoot}\installer\setup-helpers\unregister-agent-tray.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion
 Source: "{#SourceRoot}\installer\setup-helpers\stop-agent-for-upgrade.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion
+Source: "{#SourceRoot}\installer\setup-helpers\verify-agent-install.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion
 
 [Dirs]
 Name: "{commonappdata}\CherrySentinel\Agent"
@@ -119,8 +121,13 @@ Name: "{autodesktop}\Cherry Sentinel Agent"; Filename: "{app}\CherrySentinel.Age
 
 [Run]
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Installer\register-agent-service.ps1"" -InstallDir ""{app}"" -DataDir ""{commonappdata}\CherrySentinel\Agent"" -ServiceName ""CherrySentinelAgent"" -StartService {code:StartServiceFlag} -CentralUrl ""{code:GetCentralUrl}"""; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Installer\register-agent-service.ps1"" -InstallDir ""{app}"" -DataDir ""{commonappdata}\CherrySentinel\Agent"" -ServiceName ""CherrySentinelAgent"" -StartService {code:StartServiceFlag} -CentralUrl ""{code:GetCentralUrl}"" -EnrollmentToken ""{code:GetEnrollmentToken}"""; \
   StatusMsg: "Registering Agent service + applying Central URL..."; \
+  Flags: runhidden waituntilterminated
+
+Filename: "powershell.exe"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Installer\verify-agent-install.ps1"" -InstallDir ""{app}"" -ServiceName ""CherrySentinelAgent"" -MinVersion ""{#MyAppVersion}"""; \
+  StatusMsg: "Verifying Agent binary version..."; \
   Flags: runhidden waituntilterminated
 
 Filename: "powershell.exe"; \
@@ -171,12 +178,14 @@ var
 begin
   CentralPage := CreateInputQueryPage(wpSelectDir,
     'Central Server IP + Port',
-    'Agent ส่งข้อมูลไป Central (ไม่ต่อ Dashboard โดยตรง)',
-    'ใส่ IP เครื่องที่รัน Central Server และพอร์ต HTTPS (ค่าเริ่มต้น 7443)' + #13#10 +
-    'Example: Host=10.0.0.5  Port=7443  →  https://10.0.0.5:7443' + #13#10 +
-    'Silent: /ServerHost=10.0.0.5 /Port=7443');
-  CentralPage.Add('Central Server IP or Host name:', False);
+    'Agent ส่งข้อมูลไป Central เท่านั้น (ไม่ต่อ Dashboard)',
+    'ใส่ IP เครื่องที่รัน Central — ห้ามใช้ localhost ถ้า Central อยู่คนละเครื่อง' + #13#10 +
+    'Example: 10.0.0.5  Port 7443' + #13#10 +
+    'Optional EnrollmentToken from Central secrets.json / connection.json' + #13#10 +
+    'Silent: /ServerHost=10.0.0.5 /Port=7443 /EnrollmentToken=...');
+  CentralPage.Add('Central Server IP or Host name (NOT localhost for remote):', False);
   CentralPage.Add('HTTPS Port:', False);
+  CentralPage.Add('Enrollment Token (optional):', False);
 
   CmdUrl := GetCommandLineParam('CentralUrl');
   CmdHost := GetCommandLineParam('ServerHost');
@@ -193,6 +202,7 @@ begin
     if CmdHost <> '' then CentralPage.Values[0] := CmdHost else CentralPage.Values[0] := 'localhost';
     if CmdPort <> '' then CentralPage.Values[1] := CmdPort else CentralPage.Values[1] := '7443';
   end;
+  CentralPage.Values[2] := GetCommandLineParam('EnrollmentToken');
 end;
 
 // Forward declare — full body below
@@ -238,6 +248,13 @@ begin
   // Kill BEFORE Restart Manager "applications using files" dialog
   if CurPageID = wpReady then
     KillAgentProcesses;
+end;
+
+function GetEnrollmentToken(Param: String): String;
+begin
+  Result := GetCommandLineParam('EnrollmentToken');
+  if (Result = '') and Assigned(CentralPage) then
+    Result := Trim(CentralPage.Values[2]);
 end;
 
 function GetCentralUrl(Param: String): String;

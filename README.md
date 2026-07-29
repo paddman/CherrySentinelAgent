@@ -14,14 +14,14 @@ Default posture: **IDS / detect-only** (optional IPS auto-block).
 
 ## Download installers (GitHub Releases)
 
-**Latest:** [**v1.0.13**](https://github.com/paddman/CherrySentinelAgent/releases/tag/v1.0.13) · [All releases](https://github.com/paddman/CherrySentinelAgent/releases)
+**Latest packages (local `artifacts/setup`):** **v1.0.14** · [All GitHub releases](https://github.com/paddman/CherrySentinelAgent/releases)
 
 | File | Platform | Description | Size |
 |------|----------|-------------|------|
-| [**CherrySentinel-Setup-1.0.13.exe**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.13/CherrySentinel-Setup-1.0.13.exe) | Windows | Full stack: Central + Agent + Dashboard (auth, metrics fleet UI) | ~133 MB |
-| [**CherrySentinel-Agent-Setup-1.0.15.exe**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.13/CherrySentinel-Agent-Setup-1.0.15.exe) | Windows | Agent only + tray (Edit Central IP/Port) | ~58 MB |
-| [**CherrySentinel-Central-Setup-1.0.5.exe**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.13/CherrySentinel-Central-Setup-1.0.5.exe) | Windows | Central server only | ~36 MB |
-| [**CherrySentinel-Linux-Agent-1.0.13-linux-x64.tar.gz**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.13/CherrySentinel-Linux-Agent-1.0.13-linux-x64.tar.gz) | Linux x64 | Metrics + logs + auth + remediation + `install-agent.sh` | ~31 MB |
+| **CherrySentinel-Setup-1.0.14.exe** | Windows | Full stack: Central + Agent + Dashboard (CPU/MEM/DISK/IO fleet UI, no Deadline) | ~133 MB |
+| **CherrySentinel-Agent-Setup-1.0.16.exe** | Windows | Agent only + tray — host CPU, MEM, disk %, disk I/O | ~58 MB |
+| **CherrySentinel-Central-Setup-1.0.6.exe** | Windows | Central server only | ~36 MB |
+| **CherrySentinel-Linux-Agent-1.0.14-linux-x64.tar.gz** | Linux x64 | Metrics + logs + auth + remediation | ~31 MB |
 
 ```mermaid
 %%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#0F68FF','primaryTextColor':'#fff','primaryBorderColor':'#071C3D','lineColor':'#0F68FF','secondaryColor':'#E8F0FE','tertiaryColor':'#F7F9FD'}}}%%

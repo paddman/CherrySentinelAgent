@@ -7,10 +7,11 @@
 ;
 ; Silent example:
 ;   CherrySentinel-Central-Setup-1.0.0.exe /VERYSILENT /Port=7443
+;   CherrySentinel-Central-Setup.exe /VERYSILENT /Port=7443 /PublicHost=180.180.243.82
 
 #define MyAppName "Cherry Sentinel Central"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.0"
+  #define MyAppVersion "1.1.0"
 #endif
 #define MyAppPublisher "CherryDeskX"
 #define MyAppURL "https://github.com/cherrysentinel"
@@ -94,6 +95,8 @@ Source: "{#SourceRoot}\config\signatures\opensource-signatures.json"; DestDir: "
 Source: "{#SourceRoot}\installer\setup-helpers\register-central-service.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion
 Source: "{#SourceRoot}\installer\setup-helpers\unregister-central-service.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion
 Source: "{#SourceRoot}\installer\setup-helpers\stop-central-for-upgrade.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion
+Source: "{#SourceRoot}\installer\setup-helpers\write-connection-info.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion
+Source: "{#SourceRoot}\installer\setup-helpers\regenerate-central-cert.ps1"; DestDir: "{app}\Installer"; Flags: ignoreversion
 
 [Dirs]
 Name: "{commonappdata}\CherrySentinel\Server"
@@ -111,8 +114,8 @@ Name: "{autodesktop}\Cherry Sentinel Central"; Filename: "{app}\Open-Central-Inf
 
 [Run]
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Installer\register-central-service.ps1"" -InstallDir ""{app}"" -DataDir ""{commonappdata}\CherrySentinel\Server"" -ServiceName ""CherrySentinelCentral"" -StartService {code:StartServiceFlag} -Port ""{code:GetPort}"""; \
-  StatusMsg: "Registering Central service..."; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Installer\register-central-service.ps1"" -InstallDir ""{app}"" -DataDir ""{commonappdata}\CherrySentinel\Server"" -ServiceName ""CherrySentinelCentral"" -StartService {code:StartServiceFlag} -Port ""{code:GetPort}"" -PublicHost ""{code:GetPublicHost}"" -TrustCertificate ""1"" -RegenerateCertificate ""1"""; \
+  StatusMsg: "Registering Central service + HTTPS certificate..."; \
   Flags: runhidden waituntilterminated
 
 Filename: "powershell.exe"; \
@@ -135,6 +138,7 @@ Filename: "powershell.exe"; \
 var
   PortPage: TInputQueryWizardPage;
   GPort: String;
+  GPublicHost: String;
 
 function GetCommandLineParam(const ParamName: String): String;
 var
@@ -158,21 +162,31 @@ end;
 
 procedure InitializeWizard;
 var
-  CmdPort: String;
+  CmdPort, CmdHost: String;
 begin
   PortPage := CreateInputQueryPage(wpSelectDir,
-    'Central Listen Port',
-    'พอร์ต HTTPS ของ Central API',
-    'Agent และ Dashboard จะเชื่อมต่อที่ https://<this-host>:<port>%n%n' +
-    'Default SQLite database — no PostgreSQL required.%n' +
-    'Example port: 7443');
+    'Central HTTPS',
+    'พอร์ต + Public IP/DNS สำหรับ HTTPS',
+    'Agent และ Dashboard เชื่อมต่อ https://<host>:<port>%n%n' +
+    'ใส่ Public / NAT IP ถ้ามี (เช่น 180.180.243.82) เพื่อใส่ใน certificate SAN%n' +
+    'ว่างไว้ได้ — จะใส่ IP ของ NIC อัตโนมัติ%n%n' +
+    'Silent: /Port=7443 /PublicHost=180.180.243.82');
   PortPage.Add('HTTPS Port:', False);
+  PortPage.Add('Public Host / IP (optional):', False);
 
   CmdPort := GetCommandLineParam('Port');
   if CmdPort <> '' then
     PortPage.Values[0] := CmdPort
   else
     PortPage.Values[0] := '7443';
+
+  CmdHost := GetCommandLineParam('PublicHost');
+  if CmdHost = '' then
+    CmdHost := GetCommandLineParam('ServerHost');
+  if CmdHost <> '' then
+    PortPage.Values[1] := CmdHost
+  else
+    PortPage.Values[1] := '';
 end;
 
 procedure KillCentralProcesses;
@@ -203,6 +217,7 @@ begin
     end;
     PortPage.Values[0] := IntToStr(PortNum);
     GPort := PortPage.Values[0];
+    GPublicHost := Trim(PortPage.Values[1]);
   end;
 
   if CurPageID = wpReady then
@@ -224,6 +239,23 @@ begin
       Result := CmdPort
     else
       Result := '7443';
+  end;
+end;
+
+function GetPublicHost(Param: String): String;
+var
+  CmdHost: String;
+begin
+  if GPublicHost <> '' then
+    Result := GPublicHost
+  else if Assigned(PortPage) then
+    Result := Trim(PortPage.Values[1])
+  else
+  begin
+    CmdHost := GetCommandLineParam('PublicHost');
+    if CmdHost = '' then
+      CmdHost := GetCommandLineParam('ServerHost');
+    Result := CmdHost;
   end;
 end;
 
@@ -266,14 +298,23 @@ end;
 
 function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo,
   MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+var
+  HostHint: String;
 begin
+  HostHint := GetPublicHost('');
+  if HostHint = '' then
+    HostHint := '<this-host-or-LAN-IP>';
   Result :=
     MemoDirInfo + NewLine + NewLine +
     'Central HTTPS URL:' + NewLine +
     Space + 'https://localhost:' + GetPort('') + NewLine +
-    Space + 'https://<this-host>:' + GetPort('') + NewLine + NewLine +
+    Space + 'https://' + HostHint + ':' + GetPort('') + NewLine + NewLine +
+    'Certificate: self-signed with SAN for localhost + NIC IPs';
+  if GetPublicHost('') <> '' then
+    Result := Result + ' + ' + GetPublicHost('');
+  Result := Result + NewLine +
     'Service: CherrySentinelCentral' + NewLine +
     'Database: SQLite (ProgramData\CherrySentinel\Server\central.db)' + NewLine + NewLine +
-    'After install, set Agent Server.Url and Dashboard Settings to this URL.' + NewLine +
+    'Agent/Dashboard: use remote URL (not localhost) + AllowUntrusted=true' + NewLine +
     MemoTasksInfo;
 end;

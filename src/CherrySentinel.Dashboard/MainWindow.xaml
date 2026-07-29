@@ -45,12 +45,6 @@
               <TextBlock Text="Dashboard" Foreground="White" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
-          <Button x:Name="NavDeadline" Style="{StaticResource SideButton}" Click="Nav_Click" Tag="Deadline">
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Text="◷" Foreground="White" FontSize="20" Width="34"/>
-              <TextBlock Text="Deadline" Foreground="White" VerticalAlignment="Center"/>
-            </StackPanel>
-          </Button>
           <Button x:Name="NavIncidents" Style="{StaticResource SideButton}" Click="Nav_Click" Tag="Incidents">
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="⚠" Foreground="White" FontSize="20" Width="34"/>
@@ -82,6 +76,12 @@
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="🔥" Foreground="White" FontSize="20" Width="34"/>
               <TextBlock Text="Firewall" Foreground="White"/>
+            </StackPanel>
+          </Button>
+          <Button x:Name="NavServices" Style="{StaticResource SideButton}" Click="Nav_Click" Tag="Services">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="▶" Foreground="White" FontSize="20" Width="34"/>
+              <TextBlock Text="Services" Foreground="White"/>
             </StackPanel>
           </Button>
           <Button x:Name="NavSettings" Style="{StaticResource SideButton}" Click="Nav_Click" Tag="Settings">
@@ -296,99 +296,6 @@
         </StackPanel>
       </ScrollViewer>
 
-      <!-- Deadline countdown: user-entered tasks and subtasks -->
-      <Border x:Name="PageDeadline" Visibility="Collapsed" Margin="12" Style="{StaticResource Card}">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-          <StackPanel>
-            <DockPanel Margin="0,0,0,4">
-              <StackPanel>
-                <TextBlock Text="Deadline Countdown" FontWeight="Bold" FontSize="20"/>
-                <TextBlock Text="นับถอยหลังแบบ realtime จากวันเวลาที่ผู้ใช้กรอก (อัปเดตทุก 1 วินาที)"
-                           Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/>
-              </StackPanel>
-              <TextBlock x:Name="DeadlineClockText" Text="เวลาเครื่อง: --:--:--"
-                         Foreground="{StaticResource BrandBrush}" FontWeight="SemiBold"
-                         DockPanel.Dock="Right" VerticalAlignment="Center"/>
-            </DockPanel>
-
-            <Border Background="#F8FAFC" BorderBrush="#DCE5F2" BorderThickness="1"
-                    CornerRadius="8" Padding="12" Margin="0,12,0,14">
-              <Grid>
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="1.4*"/>
-                  <ColumnDefinition Width="1.1*"/>
-                  <ColumnDefinition Width="1*"/>
-                  <ColumnDefinition Width="1.4*"/>
-                  <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                  <RowDefinition Height="Auto"/>
-                  <RowDefinition Height="Auto"/>
-                  <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-
-                <TextBlock Text="ชื่องาน" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
-                <TextBlock Grid.Column="1" Text="วัน deadline" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
-                <TextBlock Grid.Column="2" Text="เวลา (24 ชั่วโมง)" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
-                <TextBlock Grid.Column="3" Text="เพิ่ม subtask" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
-
-                <TextBox x:Name="DeadlineTaskNameBox" Grid.Row="1" Padding="9" Margin="0,4,8,0"
-                         ToolTip="เช่น ปิดงานติดตั้งระบบ"/>
-                <DatePicker x:Name="DeadlineDatePicker" Grid.Row="1" Grid.Column="1" Margin="0,4,8,0"
-                            SelectedDateFormat="Short"/>
-                <TextBox x:Name="DeadlineTimeBox" Grid.Row="1" Grid.Column="2" Padding="9" Margin="0,4,8,0"
-                         Text="23:59:59" ToolTip="รูปแบบ HH:mm:ss"/>
-                <TextBox x:Name="DeadlineSubtaskBox" Grid.Row="1" Grid.Column="3" Padding="9" Margin="0,4,8,0"
-                         ToolTip="เช่น ตรวจสอบเอกสาร"/>
-                <Button Grid.Row="1" Grid.Column="4" Content="เพิ่ม subtask" Style="{StaticResource OutlineButton}"
-                        Click="AddSubtask_Click" Padding="12,9" Margin="0,4,0,0"/>
-
-                <TextBlock Grid.Row="2" Grid.Column="3" x:Name="PendingSubtaskHint"
-                           Text="ยังไม่มี subtask" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,7,0,0"/>
-                <Button Grid.Row="2" Grid.Column="4" Content="เพิ่มงาน" Style="{StaticResource PrimaryButton}"
-                        Click="AddDeadlineTask_Click" Padding="18,9" Margin="0,7,0,0"/>
-              </Grid>
-            </Border>
-
-            <Border Background="#F8FAFC" BorderBrush="#DCE5F2" BorderThickness="1"
-                    CornerRadius="8" Padding="10" Margin="0,0,0,12">
-              <DockPanel>
-                <TextBlock Text="subtask ที่รอเพิ่ม:" Foreground="{StaticResource MutedBrush}"
-                           VerticalAlignment="Top" Margin="0,4,10,0"/>
-                <ListBox x:Name="PendingSubtasksList" Height="56" MinWidth="280"
-                         BorderThickness="0" Background="Transparent"/>
-                <Button Content="ลบรายการที่เลือก" Style="{StaticResource OutlineButton}"
-                        Click="RemoveSubtask_Click" Padding="12,8" DockPanel.Dock="Right"/>
-              </DockPanel>
-            </Border>
-
-            <DockPanel Margin="0,0,0,8">
-              <TextBlock Text="งานที่มี deadline" FontWeight="Bold" FontSize="16"/>
-              <Button Content="ลบงานที่เลือก" Style="{StaticResource OutlineButton}"
-                      Click="RemoveDeadlineTask_Click" Padding="12,7" DockPanel.Dock="Right"/>
-            </DockPanel>
-            <TextBlock x:Name="DeadlineEmptyText" Text="ยังไม่มีงานที่เพิ่มเข้ามา"
-                       Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8"/>
-            <DataGrid x:Name="DeadlineTasksGrid" MinHeight="180" MaxHeight="420"
-                      SelectionMode="Single" SelectionUnit="FullRow">
-              <DataGrid.Columns>
-                <DataGridTextColumn Header="งาน" Binding="{Binding TaskName}" Width="1.45*"/>
-                <DataGridTextColumn Header="Deadline" Binding="{Binding DeadlineText}" Width="170"/>
-                <DataGridTextColumn Header="Countdown" Binding="{Binding CountdownText}" Width="180"/>
-                <DataGridTextColumn Header="สถานะ" Binding="{Binding StatusText}" Width="110"/>
-                <DataGridTextColumn Header="Subtasks" Binding="{Binding SubtasksText}" Width="2*">
-                  <DataGridTextColumn.ElementStyle>
-                    <Style TargetType="TextBlock">
-                      <Setter Property="TextWrapping" Value="Wrap"/>
-                      <Setter Property="VerticalAlignment" Value="Center"/>
-                    </Style>
-                  </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-              </DataGrid.Columns>
-            </DataGrid>
-          </StackPanel>
-        </ScrollViewer>
-      </Border>
 
       <!-- Incidents page -->
       <Border x:Name="PageIncidents" Visibility="Collapsed" Margin="12" Style="{StaticResource Card}">
@@ -600,6 +507,21 @@
                   <TextBlock x:Name="AgDetailMetricsLine" Foreground="#7DD3FC" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap" Text="—"/>
                 </Border>
                 <TextBlock x:Name="AgDetailError" Foreground="#FCA5A5" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
+
+                <TextBlock Text="SERVICE CONTROL (this host)" Foreground="#64748B" FontSize="10" FontWeight="SemiBold" Margin="12,8,0,6"/>
+                <Border Background="#111827" CornerRadius="10" Padding="12" Margin="0,0,0,4">
+                  <StackPanel>
+                    <TextBox x:Name="AgSvcNameBox" Padding="8" Margin="0,0,0,8" Background="#1F2937" Foreground="White"
+                             BorderBrush="#374151" CaretBrush="White" FontFamily="Consolas"
+                             ToolTip="Windows service short name or Linux unit"/>
+                    <StackPanel Orientation="Horizontal">
+                      <Button Content="Start" Padding="12,6" Margin="0,0,8,0" Click="AgSvcStart_Click"/>
+                      <Button Content="Stop" Padding="12,6" Margin="0,0,8,0" Click="AgSvcStop_Click"/>
+                      <Button Content="Restart" Padding="12,6" Click="AgSvcRestart_Click"/>
+                    </StackPanel>
+                    <TextBlock x:Name="AgSvcStatusText" Foreground="#94A3B8" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Border>
               </StackPanel>
             </ScrollViewer>
           </Border>
@@ -693,6 +615,64 @@
                 <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="90"/>
                 <DataGridTextColumn Header="Action" Binding="{Binding Action}" Width="140"/>
                 <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="160"/>
+                <DataGridTextColumn Header="Agent" Binding="{Binding TriggeredBy}" Width="*"/>
+                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="120"/>
+              </DataGrid.Columns>
+            </DataGrid>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+
+      <!-- Services start/stop/restart via Central → Agent -->
+      <Border x:Name="PageServices" Visibility="Collapsed" Margin="12" Style="{StaticResource Card}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel>
+            <TextBlock Text="Service Control" FontWeight="Bold" FontSize="18" Margin="0,0,0,4"/>
+            <TextBlock Text="Start / Stop / Restart Windows service or Linux systemd unit on a remote agent. Queued via Central, applied on next heartbeat."
+                       Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,14"/>
+
+            <TextBlock Text="Target Agent" FontWeight="SemiBold" Margin="0,0,0,4"/>
+            <ComboBox x:Name="SvcAgentBox" Height="34" Margin="0,0,0,12" DisplayMemberPath="Display"/>
+
+            <Border BorderBrush="#DCE5F2" BorderThickness="1" CornerRadius="10" Padding="16" Background="#FAFCFF" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock Text="Service / unit name" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <TextBlock Text="Windows: short service name (e.g. W3SVC, Spooler, MySQL80) · Linux: nginx, php8.3-fpm, docker"
+                           Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap"/>
+                <TextBox x:Name="SvcNameBox" Padding="10" Margin="0,0,0,10" FontFamily="Consolas"
+                         ToolTip="Service name as used by sc.exe / systemctl"/>
+
+                <TextBlock Text="Reason (audit)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <TextBox x:Name="SvcReasonBox" Padding="10" Margin="0,0,0,14" Text="Operator service control from Dashboard"/>
+
+                <TextBlock Text="Quick picks" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,6"/>
+                <WrapPanel Margin="0,0,0,14">
+                  <Button Content="W3SVC (IIS)" Style="{StaticResource OutlineButton}" Margin="0,0,8,8" Padding="10,6" Click="SvcQuick_Click" Tag="W3SVC"/>
+                  <Button Content="WAS" Style="{StaticResource OutlineButton}" Margin="0,0,8,8" Padding="10,6" Click="SvcQuick_Click" Tag="WAS"/>
+                  <Button Content="Spooler" Style="{StaticResource OutlineButton}" Margin="0,0,8,8" Padding="10,6" Click="SvcQuick_Click" Tag="Spooler"/>
+                  <Button Content="MSSQLSERVER" Style="{StaticResource OutlineButton}" Margin="0,0,8,8" Padding="10,6" Click="SvcQuick_Click" Tag="MSSQLSERVER"/>
+                  <Button Content="nginx" Style="{StaticResource OutlineButton}" Margin="0,0,8,8" Padding="10,6" Click="SvcQuick_Click" Tag="nginx"/>
+                  <Button Content="php-fpm" Style="{StaticResource OutlineButton}" Margin="0,0,8,8" Padding="10,6" Click="SvcQuick_Click" Tag="php-fpm"/>
+                  <Button Content="docker" Style="{StaticResource OutlineButton}" Margin="0,0,8,8" Padding="10,6" Click="SvcQuick_Click" Tag="docker"/>
+                </WrapPanel>
+
+                <StackPanel Orientation="Horizontal">
+                  <Button Content="▶ Start" Style="{StaticResource PrimaryButton}" Click="SvcStart_Click" Margin="0,0,10,0" Padding="18,10"/>
+                  <Button Content="■ Stop" Style="{StaticResource OutlineButton}" Click="SvcStop_Click" Margin="0,0,10,0" Padding="18,10"/>
+                  <Button Content="↻ Restart" Style="{StaticResource PrimaryButton}" Click="SvcRestart_Click" Padding="18,10"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <TextBlock x:Name="SvcStatusText" Margin="0,4,0,8" TextWrapping="Wrap"
+                       Text="Select agent + service name, then Start / Stop / Restart. Agent applies on next heartbeat (~60s)."/>
+            <TextBlock Text="Session actions" FontWeight="SemiBold" Margin="0,4,0,6"/>
+            <DataGrid x:Name="SvcActionsGrid" Height="200" HeadersVisibility="Column" IsReadOnly="True"
+                      AutoGenerateColumns="False">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="90"/>
+                <DataGridTextColumn Header="Action" Binding="{Binding Action}" Width="120"/>
+                <DataGridTextColumn Header="Service" Binding="{Binding Target}" Width="160"/>
                 <DataGridTextColumn Header="Agent" Binding="{Binding TriggeredBy}" Width="*"/>
                 <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="120"/>
               </DataGrid.Columns>

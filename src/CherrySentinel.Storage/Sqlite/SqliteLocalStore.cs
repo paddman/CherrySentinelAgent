@@ -721,26 +721,103 @@ public sealed class SqliteLocalStore : ILocalStore
             }
 
             var size = await GetDatabaseSizeBytesUnsafeAsync();
-            var maxBytes = _storageOptions.MaxDatabaseSizeMb * 1024L * 1024L;
+            var maxBytes = Math.Max(64, _storageOptions.MaxDatabaseSizeMb) * 1024L * 1024L;
             if (size > maxBytes)
             {
                 _logger.LogWarning("Database size {Size} exceeds max {Max}; running aggressive purge", size, maxBytes);
-                var aggressiveCutoff = DateTimeOffset.UtcNow.AddDays(-Math.Max(1, _storageOptions.RetentionDays / 2)).ToString("O");
-                await using var cmd = Conn.CreateCommand();
-                cmd.CommandText =
-                    """
-                    DELETE FROM security_events WHERE timestamp_utc < $cutoff;
-                    DELETE FROM network_connections WHERE timestamp_utc < $cutoff;
-                    DELETE FROM processes WHERE timestamp_utc < $cutoff;
-                    """;
-                cmd.Parameters.AddWithValue("$cutoff", aggressiveCutoff);
-                await cmd.ExecuteNonQueryAsync(cancellationToken);
+                // Keep only last 24h of high-volume tables (8GB DBs hang startup otherwise)
+                var aggressiveCutoff = DateTimeOffset.UtcNow.AddHours(-24).ToString("O");
+                foreach (var table in new[]
+                         {
+                             "security_events", "network_connections", "processes", "services",
+                             "scheduled_tasks", "detection_alerts"
+                         })
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await using var cmd = Conn.CreateCommand();
+                    cmd.CommandText = $"DELETE FROM {table} WHERE timestamp_utc < $cutoff;";
+                    cmd.Parameters.AddWithValue("$cutoff", aggressiveCutoff);
+                    var n = await cmd.ExecuteNonQueryAsync(cancellationToken);
+                    if (n > 0)
+                        _logger.LogInformation("Aggressive purge {Table} deleted={Count}", table, n);
+                }
+
+                await using (var q = Conn.CreateCommand())
+                {
+                    q.CommandText = "DELETE FROM outbound_queue WHERE status = 'Sent';";
+                    await q.ExecuteNonQueryAsync(cancellationToken);
+                }
             }
 
             await using (var vacuum = Conn.CreateCommand())
             {
                 vacuum.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
                 await vacuum.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            // VACUUM reclaims disk; only when still oversized (can take time on huge files)
+            size = await GetDatabaseSizeBytesUnsafeAsync();
+            if (size > maxBytes)
+            {
+                _logger.LogWarning("Running VACUUM to reclaim space (size={Size})", size);
+                await using var vac = Conn.CreateCommand();
+                vac.CommandText = "VACUUM;";
+                vac.CommandTimeout = 600;
+                await vac.ExecuteNonQueryAsync(cancellationToken);
+                size = await GetDatabaseSizeBytesUnsafeAsync();
+                _logger.LogInformation("After VACUUM size={Size}", size);
+            }
+
+            // Nuclear option: still huge after purge+vacuum → rotate DB file so agent stays healthy
+            if (size > maxBytes * 2)
+            {
+                _logger.LogError(
+                    "Local DB still {Size} bytes after purge (max={Max}). Rotating database so agent stays healthy.",
+                    size, maxBytes);
+                try
+                {
+                    if (_connection is not null)
+                    {
+                        await _connection.DisposeAsync();
+                        _connection = null;
+                    }
+
+                    var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss");
+                    var bak = _dbPath + $".oversized.{stamp}.bak";
+                    if (File.Exists(_dbPath))
+                        File.Move(_dbPath, bak, overwrite: true);
+                    foreach (var side in new[] { "-wal", "-shm" })
+                    {
+                        var p = _dbPath + side;
+                        if (File.Exists(p))
+                            File.Move(p, bak + side, overwrite: true);
+                    }
+
+                    _connection = new SqliteConnection(new SqliteConnectionStringBuilder
+                    {
+                        DataSource = _dbPath,
+                        Mode = SqliteOpenMode.ReadWriteCreate,
+                        Cache = SqliteCacheMode.Shared
+                    }.ToString());
+                    await _connection.OpenAsync(cancellationToken);
+                    await SchemaMigrator.MigrateAsync(_connection, cancellationToken);
+                    _logger.LogWarning("Rotated oversized DB to {Bak}; fresh store ready", bak);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to rotate oversized local DB");
+                    if (_connection is null)
+                    {
+                        _connection = new SqliteConnection(new SqliteConnectionStringBuilder
+                        {
+                            DataSource = _dbPath,
+                            Mode = SqliteOpenMode.ReadWriteCreate,
+                            Cache = SqliteCacheMode.Shared
+                        }.ToString());
+                        await _connection.OpenAsync(cancellationToken);
+                        await SchemaMigrator.MigrateAsync(_connection, cancellationToken);
+                    }
+                }
             }
         }
         finally

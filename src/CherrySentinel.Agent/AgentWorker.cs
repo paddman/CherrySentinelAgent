@@ -109,6 +109,15 @@ public sealed class AgentWorker : BackgroundService
         _runtimePolicy.SeedFromLocal(_agentOptions, _responseOptions);
         ProbeSelfIntegrity();
         LoadApiKeyFromCredentialFile();
+        // Seed metrics counters without blocking the service thread long (async)
+        try
+        {
+            await Task.Run(() => WindowsHostMetrics.Warmup(200), stoppingToken);
+        }
+        catch
+        {
+            // ignore
+        }
 
         await _store.InitializeAsync(stoppingToken);
         await _detectionEngine.InitializeAsync(stoppingToken);
@@ -391,7 +400,26 @@ public sealed class AgentWorker : BackgroundService
     private async Task HeartbeatAsync()
     {
         using var proc = System.Diagnostics.Process.GetCurrentProcess();
-        var (diskPct, memPct, hostMemUsed, hostMemTotal) = SampleWindowsHostMetrics();
+        var host = WindowsHostMetrics.Sample();
+        var summaryParts = new List<string>();
+        if (host.CpuPercent is double cpu) summaryParts.Add($"cpu={cpu:F1}%");
+        if (host.MemUsedPercent is double mem) summaryParts.Add($"mem={mem:F1}%");
+        if (host.DiskUsedPercent is double disk) summaryParts.Add($"disk={disk:F1}%");
+        if (host.DiskReadBytesPerSec is not null || host.DiskWriteBytesPerSec is not null)
+        {
+            summaryParts.Add(
+                $"io_r={FormatBps(host.DiskReadBytesPerSec ?? 0)} io_w={FormatBps(host.DiskWriteBytesPerSec ?? 0)}");
+        }
+
+        if (host.NetworkRxBytesPerSec is not null || host.NetworkTxBytesPerSec is not null)
+        {
+            summaryParts.Add(
+                $"net_rx={FormatBps(host.NetworkRxBytesPerSec ?? 0)} net_tx={FormatBps(host.NetworkTxBytesPerSec ?? 0)}");
+        }
+
+        summaryParts.Add($"ws={proc.WorkingSet64 / (1024 * 1024)}MB");
+        var metricsSummary = string.Join(" ", summaryParts);
+
         var hb = new AgentHeartbeat
         {
             AgentId = _agentOptions.AgentId,
@@ -402,7 +430,7 @@ public sealed class AgentWorker : BackgroundService
             LocalQueueDepth = await _store.GetOutboundQueueDepthAsync(CancellationToken.None),
             DatabaseSizeBytes = await _store.GetDatabaseSizeBytesAsync(CancellationToken.None),
             WorkingSetBytes = proc.WorkingSet64,
-            Status = "Healthy",
+            Status = string.IsNullOrEmpty(metricsSummary) ? "Healthy" : $"Healthy | {metricsSummary}",
             HostIp = TryGetPrimaryIpv4(),
             CentralUrl = _centralOptions.Url,
             Platform = "windows",
@@ -410,13 +438,16 @@ public sealed class AgentWorker : BackgroundService
             BinarySha256 = _binarySha256,
             IsBinarySigned = _isBinarySigned,
             AppliedPolicyVersion = _runtimePolicy.PolicyVersion > 0 ? _runtimePolicy.PolicyVersion : null,
-            MemUsedPercent = memPct,
-            DiskUsedPercent = diskPct,
-            HostMemUsedBytes = hostMemUsed,
-            HostMemTotalBytes = hostMemTotal,
-            MetricsSummary = diskPct is double d && memPct is double m
-                ? $"mem={m:F1}% disk={d:F1}% ws={proc.WorkingSet64 / (1024 * 1024)}MB"
-                : $"ws={proc.WorkingSet64 / (1024 * 1024)}MB"
+            CpuPercentEstimate = host.CpuPercent,
+            MemUsedPercent = host.MemUsedPercent,
+            DiskUsedPercent = host.DiskUsedPercent,
+            DiskReadBytesPerSec = host.DiskReadBytesPerSec,
+            DiskWriteBytesPerSec = host.DiskWriteBytesPerSec,
+            NetworkRxBytesPerSec = host.NetworkRxBytesPerSec,
+            NetworkTxBytesPerSec = host.NetworkTxBytesPerSec,
+            HostMemUsedBytes = host.HostMemUsedBytes,
+            HostMemTotalBytes = host.HostMemTotalBytes,
+            MetricsSummary = metricsSummary
         };
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Max(5, _centralOptions.TimeoutSeconds))))
         {
@@ -534,47 +565,11 @@ public sealed class AgentWorker : BackgroundService
         }
     }
 
-    private static (double? DiskPct, double? MemPct, long? HostMemUsed, long? HostMemTotal) SampleWindowsHostMetrics()
+    private static string FormatBps(double bps)
     {
-        double? diskPct = null;
-        try
-        {
-            var sys = DriveInfo.GetDrives().FirstOrDefault(d =>
-                d.IsReady && d.Name.StartsWith(Path.GetPathRoot(Environment.SystemDirectory) ?? "C", StringComparison.OrdinalIgnoreCase));
-            if (sys is { TotalSize: > 0 })
-                diskPct = 100.0 * (1.0 - (double)sys.AvailableFreeSpace / sys.TotalSize);
-        }
-        catch { /* ignore */ }
-
-        double? memPct = null;
-        long? used = null, total = null;
-        try
-        {
-            var info = GC.GetGCMemoryInfo();
-            total = info.TotalAvailableMemoryBytes;
-            if (total is > 0)
-            {
-                // Approximate host pressure via available memory reported to GC
-                var available = info.TotalAvailableMemoryBytes; // not free; best-effort
-                // Prefer GlobalMemoryStatusEx via working set ratio is weak — use TotalAvailable as total
-                used = null;
-                memPct = null;
-            }
-        }
-        catch { /* ignore */ }
-
-        try
-        {
-            // Environment.WorkingSet is process; for host use PerformanceCounter when available is heavy —
-            // report process working set share only as HostMemUsed when total known.
-            using var p = System.Diagnostics.Process.GetCurrentProcess();
-            used = p.WorkingSet64;
-            if (total is > 0 && used is > 0)
-                memPct = Math.Clamp(100.0 * used.Value / total.Value, 0, 100);
-        }
-        catch { /* ignore */ }
-
-        return (diskPct, memPct, used, total);
+        if (bps >= 1_048_576) return $"{bps / 1_048_576:F2}MB/s";
+        if (bps >= 1024) return $"{bps / 1024:F1}KB/s";
+        return $"{bps:F0}B/s";
     }
 
     private string CredentialPath =>

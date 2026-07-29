@@ -177,7 +177,9 @@ internal static class AgentStatusReader
         else
         {
             s.State = "Stopped";
-            s.Message = "Agent service is not running";
+            s.Message = s.ServiceStatus is "Not installed"
+                ? "Service not installed — use Install / Register Agent service (tray menu) or Agent Setup"
+                : "Agent service is not running — click Start Agent";
         }
 
         // Stale status file (> 2 min) while service running

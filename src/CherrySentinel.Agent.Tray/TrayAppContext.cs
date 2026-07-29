@@ -48,6 +48,13 @@ internal sealed class TrayAppContext : ApplicationContext
         _menu.Items.Add("Test Central connection…", null, async (_, _) => await TestCentralAsync());
         _menu.Items.Add("Open mini dashboard", null, (_, _) => ShowMiniDashboard());
         _menu.Items.Add("Close mini dashboard", null, (_, _) => HideMiniDashboard());
+        _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add("Service Control (Start/Stop)…", null, (_, _) => ShowServiceControl());
+        _menu.Items.Add("Install / Register Agent service…", null, (_, _) => InstallAgentService());
+        _menu.Items.Add("Start Agent service", null, (_, _) => ControlAgentService("start"));
+        _menu.Items.Add("Stop Agent service", null, (_, _) => ControlAgentService("stop"));
+        _menu.Items.Add("Restart Agent service", null, (_, _) => ControlAgentService("restart"));
+        _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add("Refresh status", null, (_, _) => RefreshStatus());
         _menu.Items.Add("Open logs folder", null, (_, _) => OpenFolder(LogDir));
         _menu.Items.Add("Open install folder", null, (_, _) => OpenFolder(_installDir));
@@ -180,6 +187,68 @@ internal sealed class TrayAppContext : ApplicationContext
             MessageBox.Show("Could not open editor:\n" + ex.Message,
                 "Cherry Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+    }
+
+    private void ShowServiceControl()
+    {
+        try
+        {
+            using var dlg = new ServiceControlForm();
+            dlg.ShowDialog();
+            RefreshStatus();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Could not open Service Control:\n" + ex.Message,
+                "Cherry Sentinel", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void InstallAgentService()
+    {
+        var exe = AgentServiceHelper.FindAgentExe(_installDir);
+        if (exe is null)
+        {
+            MessageBox.Show(
+                "CherrySentinel.Agent.exe not found.\nInstall CherrySentinel-Agent-Setup first.",
+                "Install Agent service", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (AgentServiceHelper.IsInstalled())
+        {
+            MessageBox.Show("Service is already registered.\nUse Start / Restart if it is stopped.",
+                "Install Agent service", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        AgentServiceHelper.RegisterService(exe, _installDir, owner: null, startAfter: true);
+        RefreshStatus();
+        try { _dash?.RefreshUiPublic(); } catch { /* ignore */ }
+    }
+
+    private void ControlAgentService(string action)
+    {
+        AgentServiceHelper.Control(action, _installDir);
+        if (AgentServiceHelper.TryGetStatus(out var st, out _))
+        {
+            var tip = action switch
+            {
+                "start" => "Agent service started",
+                "stop" => "Agent service stopped",
+                "restart" => "Agent service restarted",
+                _ => "Agent service: " + st
+            };
+            try
+            {
+                _tray.ShowBalloonTip(2500, "Cherry Sentinel", tip,
+                    action == "stop" ? ToolTipIcon.Warning : ToolTipIcon.Info);
+            }
+            catch { /* ignore */ }
+        }
+
+        RefreshStatus();
+        try { _dash?.RefreshUiPublic(); } catch { /* ignore */ }
     }
 
     private async Task TestCentralAsync()

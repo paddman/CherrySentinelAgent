@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Management;
 using System.Runtime.Versioning;
+using System.ServiceProcess;
 using System.Text.Json;
 using CherrySentinel.Core.Abstractions;
 using CherrySentinel.Core.Compatibility;
@@ -275,11 +276,23 @@ public sealed class LocalResponseExecutor : IResponseExecutor
                     }
 
                 case "StopService":
-                    await ControlServiceAsync(record, request.ServiceName, disable: false, cancellationToken);
+                    await ControlServiceAsync(record, request.ServiceName, "stop", cancellationToken);
+                    break;
+
+                case "StartService":
+                    await ControlServiceAsync(record, request.ServiceName, "start", cancellationToken);
+                    break;
+
+                case "RestartService":
+                    await ControlServiceAsync(record, request.ServiceName, "restart", cancellationToken);
                     break;
 
                 case "DisableService":
-                    await ControlServiceAsync(record, request.ServiceName, disable: true, cancellationToken);
+                    await ControlServiceAsync(record, request.ServiceName, "disable", cancellationToken);
+                    break;
+
+                case "EnableService":
+                    await ControlServiceAsync(record, request.ServiceName, "enable", cancellationToken);
                     break;
 
                 case "StopScheduledTask":
@@ -452,48 +465,165 @@ public sealed class LocalResponseExecutor : IResponseExecutor
         record.Error = result.Error;
     }
 
-    private Task ControlServiceAsync(ResponseActionRecord record, string? serviceName, bool disable, CancellationToken ct)
+    /// <param name="action">start | stop | restart | disable | enable</param>
+    private Task ControlServiceAsync(ResponseActionRecord record, string? serviceName, string action, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(serviceName) || serviceName.IndexOfAny(['"', ';', '&', '|']) >= 0)
+        if (string.IsNullOrWhiteSpace(serviceName) || serviceName.IndexOfAny(['"', ';', '&', '|', '\n', '\r']) >= 0)
         {
             throw new ArgumentException("Invalid service name");
         }
 
-        using var searcher = new ManagementObjectSearcher(
-            $"SELECT Name, State, StartMode FROM Win32_Service WHERE Name = '{EscapeWmi(serviceName)}'");
-        ManagementObject? svc = null;
-        foreach (ManagementObject obj in searcher.Get())
+        serviceName = serviceName.Trim();
+        // Protect critical OS services from stop/disable via agent
+        if (action is "stop" or "restart" or "disable" &&
+            IsProtectedService(serviceName))
         {
-            svc = obj;
-            break;
-        }
-
-        if (svc is null)
-        {
-            record.Status = "Failed";
-            record.Error = "Service not found";
+            record.Status = "Rejected";
+            record.Error = $"Service '{serviceName}' is protected (cannot {action} via agent).";
             return Task.CompletedTask;
         }
 
-        var state = svc["State"]?.ToString() ?? "Unknown";
-        var mode = svc["StartMode"]?.ToString() ?? "Unknown";
-        record.BeforeState = $"State={state};StartMode={mode}";
-
-        if (disable)
+        try
         {
-            svc.InvokeMethod("ChangeStartMode", new object[] { "Disabled" });
-            record.RollbackCommand = $"sc.exe config \"{serviceName}\" start= demand";
+            using var sc = new ServiceController(serviceName);
+            var before = $"{sc.Status}; StartType={sc.StartType}";
+            record.BeforeState = before;
+            var timeout = TimeSpan.FromSeconds(45);
+
+            switch (action.ToLowerInvariant())
+            {
+                case "start":
+                    if (sc.Status is ServiceControllerStatus.Running or ServiceControllerStatus.StartPending)
+                    {
+                        record.Result = $"already {sc.Status}";
+                        record.Status = "Completed";
+                        break;
+                    }
+
+                    sc.Start();
+                    sc.WaitForStatus(ServiceControllerStatus.Running, timeout);
+                    record.Result = "service started";
+                    record.Status = "Completed";
+                    record.RollbackCommand = $"sc.exe stop \"{serviceName}\"";
+                    break;
+
+                case "stop":
+                    if (sc.Status is ServiceControllerStatus.Stopped or ServiceControllerStatus.StopPending)
+                    {
+                        record.Result = $"already {sc.Status}";
+                        record.Status = "Completed";
+                        break;
+                    }
+
+                    sc.Stop();
+                    sc.WaitForStatus(ServiceControllerStatus.Stopped, timeout);
+                    record.Result = "service stopped";
+                    record.Status = "Completed";
+                    record.RollbackCommand = $"sc.exe start \"{serviceName}\"";
+                    break;
+
+                case "restart":
+                    if (sc.Status is not (ServiceControllerStatus.Stopped or ServiceControllerStatus.StopPending))
+                    {
+                        sc.Stop();
+                        sc.WaitForStatus(ServiceControllerStatus.Stopped, timeout);
+                    }
+
+                    sc.Refresh();
+                    sc.Start();
+                    sc.WaitForStatus(ServiceControllerStatus.Running, timeout);
+                    record.Result = "service restarted";
+                    record.Status = "Completed";
+                    record.RollbackCommand = null;
+                    break;
+
+                case "disable":
+                    // Prefer WMI ChangeStartMode + Stop
+                    SetStartModeWmi(serviceName, "Disabled");
+                    sc.Refresh();
+                    if (sc.Status is not (ServiceControllerStatus.Stopped or ServiceControllerStatus.StopPending))
+                    {
+                        sc.Stop();
+                        sc.WaitForStatus(ServiceControllerStatus.Stopped, timeout);
+                    }
+
+                    record.Result = "service stopped and disabled";
+                    record.Status = "Completed";
+                    record.RollbackCommand = $"sc.exe config \"{serviceName}\" start= demand & sc.exe start \"{serviceName}\"";
+                    break;
+
+                case "enable":
+                    SetStartModeWmi(serviceName, "Automatic");
+                    record.Result = "service set to Automatic (not started)";
+                    record.Status = "Completed";
+                    record.RollbackCommand = $"sc.exe config \"{serviceName}\" start= disabled";
+                    break;
+
+                default:
+                    record.Status = "Rejected";
+                    record.Error = "Unknown service action: " + action;
+                    break;
+            }
         }
-
-        svc.InvokeMethod("StopService", Array.Empty<object>());
-        record.Result = disable ? "service stopped and disabled" : "service stopped";
-        record.Status = "Completed";
-        if (!disable)
+        catch (InvalidOperationException ex)
         {
-            record.RollbackCommand = $"sc.exe start \"{serviceName}\"";
+            record.Status = "Failed";
+            record.Error = "Service not found or access denied: " + ex.Message;
+        }
+        catch (System.ServiceProcess.TimeoutException ex)
+        {
+            record.Status = "Failed";
+            record.Error = "Timeout waiting for service state: " + ex.Message;
+        }
+        catch (System.TimeoutException ex)
+        {
+            record.Status = "Failed";
+            record.Error = "Timeout waiting for service state: " + ex.Message;
+        }
+        catch (Exception ex)
+        {
+            record.Status = "Failed";
+            record.Error = ex.Message;
+            _logger.LogError(ex, "Service control {Action} failed for {Name}", action, serviceName);
         }
 
         return Task.CompletedTask;
+    }
+
+    private static bool IsProtectedService(string name)
+    {
+        // Service short names (not display names)
+        var n = name.Trim();
+        return n.Equals("RpcSs", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("DcomLaunch", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("LSM", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("SamSs", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("WinDefend", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("EventLog", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("PlugPlay", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("Power", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("Schedule", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("ProfSvc", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("UserManager", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("CherrySentinelAgent", StringComparison.OrdinalIgnoreCase) ||
+               n.Equals("CherrySentinelCentral", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void SetStartModeWmi(string serviceName, string mode)
+    {
+        using var searcher = new ManagementObjectSearcher(
+            $"SELECT Name FROM Win32_Service WHERE Name = '{EscapeWmi(serviceName)}'");
+        foreach (ManagementObject obj in searcher.Get())
+        {
+            using (obj)
+            {
+                obj.InvokeMethod("ChangeStartMode", new object[] { mode });
+            }
+
+            return;
+        }
+
+        throw new InvalidOperationException("Service not found for start-mode change: " + serviceName);
     }
 
     private void ControlTask(ResponseActionRecord record, ResponseActionRequest request, bool disable)
