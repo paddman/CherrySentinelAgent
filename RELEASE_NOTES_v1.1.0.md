@@ -17,7 +17,7 @@ Build artifacts (local): `artifacts/setup/` (not committed; build with `installe
 
 ### HTTPS / Central
 - Self-signed cert SANs include **all local NIC IPs** + optional **PublicHost** (e.g. NAT/public IP).
-- Installer wizard field: Public Host/IP; silent: `/PublicHost=180.180.243.82`.
+- Installer wizard field: Public Host/IP; silent: `/PublicHost=203.0.113.10`.
 - Auto-regenerate cert when SANs are incomplete (old localhost-only certs).
 - Export `central.cer`; optional trust into LocalMachine\Root.
 - Helper: `Installer/regenerate-central-cert.ps1 -PublicHost <ip>`.

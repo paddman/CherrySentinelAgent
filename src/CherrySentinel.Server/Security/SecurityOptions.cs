@@ -25,7 +25,7 @@ public sealed class SecurityOptions
 
     /// <summary>
     /// Extra DNS names / IPs for the self-signed HTTPS cert SAN (comma-separated).
-    /// Use for public/NAT IP e.g. "180.180.243.82,sentinel.example.com".
+    /// Use for public/NAT IP e.g. "203.0.113.10,sentinel.example.com".
     /// </summary>
     public string? CertificateExtraSans { get; set; }
 

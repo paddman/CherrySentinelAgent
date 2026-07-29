@@ -6,14 +6,14 @@
 
 .DESCRIPTION
   Self-signed certs created by older builds only included localhost. Remote
-  clients connecting to a public IP (e.g. https://180.180.243.82:7443) failed
+  clients connecting to a public IP (e.g. https://203.0.113.10:7443) failed
   certificate name checks. This script deletes central.pfx, updates appsettings
   CertificateExtraSans / PublicHost, restarts Central, and optionally trusts
   the new cert in LocalMachine Root on this machine.
 
 .EXAMPLE
-  .\regenerate-central-cert.ps1 -PublicHost 180.180.243.82
-  .\regenerate-central-cert.ps1 -PublicHost 180.180.243.82 -InstallDir "C:\Program Files\Cherry Sentinel Central"
+  .\regenerate-central-cert.ps1 -PublicHost 203.0.113.10
+  .\regenerate-central-cert.ps1 -PublicHost 203.0.113.10 -InstallDir "C:\Program Files\Cherry Sentinel Central"
 #>
 [CmdletBinding()]
 param(

@@ -7,7 +7,7 @@ param(
     [string]$DisplayName = "Cherry Sentinel Central",
     [string]$StartService = "1",
     [string]$Port = "7443",
-    # Public / NAT IP or DNS for HTTPS cert SAN (e.g. 180.180.243.82)
+    # Public / NAT IP or DNS for HTTPS cert SAN (e.g. 203.0.113.10)
     [string]$PublicHost = "",
     # 1 = import generated cert into LocalMachine\Root (browser trust on this host)
     [string]$TrustCertificate = "1",

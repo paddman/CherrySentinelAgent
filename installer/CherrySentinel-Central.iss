@@ -7,7 +7,7 @@
 ;
 ; Silent example:
 ;   CherrySentinel-Central-Setup-1.0.0.exe /VERYSILENT /Port=7443
-;   CherrySentinel-Central-Setup.exe /VERYSILENT /Port=7443 /PublicHost=180.180.243.82
+;   CherrySentinel-Central-Setup.exe /VERYSILENT /Port=7443 /PublicHost=203.0.113.10
 
 #define MyAppName "Cherry Sentinel Central"
 #ifndef MyAppVersion
@@ -168,9 +168,9 @@ begin
     'Central HTTPS',
     'พอร์ต + Public IP/DNS สำหรับ HTTPS',
     'Agent และ Dashboard เชื่อมต่อ https://<host>:<port>%n%n' +
-    'ใส่ Public / NAT IP ถ้ามี (เช่น 180.180.243.82) เพื่อใส่ใน certificate SAN%n' +
+    'ใส่ Public / NAT IP ถ้ามี (เช่น 203.0.113.10) เพื่อใส่ใน certificate SAN%n' +
     'ว่างไว้ได้ — จะใส่ IP ของ NIC อัตโนมัติ%n%n' +
-    'Silent: /Port=7443 /PublicHost=180.180.243.82');
+    'Silent: /Port=7443 /PublicHost=203.0.113.10');
   PortPage.Add('HTTPS Port:', False);
   PortPage.Add('Public Host / IP (optional):', False);
 
