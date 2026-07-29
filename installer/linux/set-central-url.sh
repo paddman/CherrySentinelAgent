@@ -11,11 +11,15 @@ CENTRAL_PORT="7443"
 CENTRAL_URL=""
 SCHEME="https"
 
+ENROLLMENT_TOKEN=""
+API_KEY=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host) CENTRAL_HOST="${2:-}"; shift 2 ;;
     --port) CENTRAL_PORT="${2:-}"; shift 2 ;;
     --url)  CENTRAL_URL="${2:-}"; shift 2 ;;
+    --enrollment-token) ENROLLMENT_TOKEN="${2:-}"; shift 2 ;;
+    --api-key) API_KEY="${2:-}"; shift 2 ;;
     --http) SCHEME="http"; shift ;;
     *) echo "Unknown: $1"; exit 1 ;;
   esac
@@ -54,6 +58,12 @@ with open(p) as f:
 j.setdefault("Server", {})
 j["Server"]["Url"] = r"""$CENTRAL_URL"""
 j["Server"]["AllowUntrustedServerCertificate"] = True
+et = r"""$ENROLLMENT_TOKEN"""
+ak = r"""$API_KEY"""
+if et:
+    j["Server"]["EnrollmentToken"] = et
+if ak:
+    j["Server"]["ApiKey"] = ak
 with open(p, "w") as f:
     json.dump(j, f, indent=2)
     f.write("\n")

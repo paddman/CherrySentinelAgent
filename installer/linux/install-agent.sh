@@ -31,6 +31,8 @@ Options:
   --host HOST          Central server IP or hostname
   --port PORT          HTTPS port (default 7443)
   --url URL            Full Central URL (overrides host/port)
+  --enrollment-token T Central EnrollmentToken (from secrets.json)
+  --api-key KEY        Optional existing agent ApiKey
   --http               Use http:// instead of https://
   --no-untrusted       Do not accept self-signed certificates
   --no-start           Install but do not start systemd service
@@ -38,15 +40,20 @@ Options:
 
 Examples:
   sudo ./install-agent.sh --host 192.168.56.210 --port 7443
-  sudo ./install-agent.sh --url https://10.0.0.5:7443
+  sudo ./install-agent.sh --url https://10.0.0.5:7443 --enrollment-token <token>
 EOF
 }
+
+ENROLLMENT_TOKEN=""
+API_KEY=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host) CENTRAL_HOST="${2:-}"; shift 2 ;;
     --port) CENTRAL_PORT="${2:-}"; shift 2 ;;
     --url)  CENTRAL_URL="${2:-}"; shift 2 ;;
+    --enrollment-token) ENROLLMENT_TOKEN="${2:-}"; shift 2 ;;
+    --api-key) API_KEY="${2:-}"; shift 2 ;;
     --http) SCHEME="http"; shift ;;
     --no-untrusted) ALLOW_UNTRUSTED="false"; shift ;;
     --no-start) NO_START="1"; shift ;;
@@ -162,6 +169,8 @@ if [[ ! -f "$APPSETTINGS" ]]; then
   },
   "Server": {
     "Url": "$CENTRAL_URL",
+    "EnrollmentToken": "$ENROLLMENT_TOKEN",
+    "ApiKey": "$API_KEY",
     "AllowUntrustedServerCertificate": $ALLOW_UNTRUSTED,
     "HeartbeatIntervalSeconds": 60
   }
@@ -179,6 +188,12 @@ j.setdefault("Server", {})
 j["Server"]["Url"] = r"""$CENTRAL_URL"""
 j["Server"]["AllowUntrustedServerCertificate"] = ($ALLOW_UNTRUSTED == "true")
 j["Server"]["HeartbeatIntervalSeconds"] = j["Server"].get("HeartbeatIntervalSeconds", 60)
+et = r"""$ENROLLMENT_TOKEN"""
+ak = r"""$API_KEY"""
+if et:
+    j["Server"]["EnrollmentToken"] = et
+if ak:
+    j["Server"]["ApiKey"] = ak
 j.setdefault("Agent", {})
 with open(p, "w") as f:
     json.dump(j, f, indent=2)

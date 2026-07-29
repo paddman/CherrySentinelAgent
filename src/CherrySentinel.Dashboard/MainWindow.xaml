@@ -428,23 +428,183 @@
         </Border>
       </Grid>
 
-      <!-- Agents -->
-      <Border x:Name="PageAgents" Visibility="Collapsed" Margin="12" Style="{StaticResource Card}">
-        <DataGrid x:Name="AgentsGrid">
-          <DataGrid.Columns>
-            <DataGridTextColumn Header="Online" Binding="{Binding Online}" Width="60"/>
-            <DataGridTextColumn Header="Host" Binding="{Binding ComputerName}" Width="130"/>
-            <DataGridTextColumn Header="IP" Binding="{Binding HostIp}" Width="110"/>
-            <DataGridTextColumn Header="OS" Binding="{Binding Platform}" Width="70"/>
-            <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="80"/>
-            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="90"/>
-            <DataGridTextColumn Header="Central URL" Binding="{Binding CentralUrl}" Width="160"/>
-            <DataGridTextColumn Header="Last Seen" Binding="{Binding LastSeenUtc, StringFormat=g}" Width="130"/>
-            <DataGridTextColumn Header="Last Error" Binding="{Binding LastError}" Width="*"/>
-            <DataGridTextColumn Header="Agent ID" Binding="{Binding AgentId}" Width="120"/>
-          </DataGrid.Columns>
-        </DataGrid>
-      </Border>
+      <!-- Agents — fleet + rich detail -->
+      <Grid x:Name="PageAgents" Visibility="Collapsed" Margin="12">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <!-- Fleet KPI strip -->
+        <UniformGrid x:Name="AgentsKpiStrip" Rows="1" Columns="5" Margin="0,0,0,10">
+          <Border Style="{StaticResource Card}" Margin="0,0,8,0" Padding="14,12">
+            <StackPanel>
+              <TextBlock Text="FLEET" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+              <TextBlock x:Name="AgKpiTotal" Text="0" FontSize="26" FontWeight="Bold"/>
+              <TextBlock Text="endpoints" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource Card}" Margin="0,0,8,0" Padding="14,12">
+            <StackPanel>
+              <TextBlock Text="ONLINE" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+              <TextBlock x:Name="AgKpiOnline" Text="0" FontSize="26" FontWeight="Bold" Foreground="#059669"/>
+              <TextBlock x:Name="AgKpiOffline" Text="0 offline" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource Card}" Margin="0,0,8,0" Padding="14,12">
+            <StackPanel>
+              <TextBlock Text="WINDOWS" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+              <TextBlock x:Name="AgKpiWin" Text="0" FontSize="26" FontWeight="Bold" Foreground="#0F68FF"/>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource Card}" Margin="0,0,8,0" Padding="14,12">
+            <StackPanel>
+              <TextBlock Text="LINUX" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+              <TextBlock x:Name="AgKpiLinux" Text="0" FontSize="26" FontWeight="Bold" Foreground="#7C3AED"/>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource Card}" Padding="14,12">
+            <StackPanel>
+              <TextBlock Text="AVG CPU / MEM" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+              <TextBlock x:Name="AgKpiAvg" Text="— / —" FontSize="20" FontWeight="Bold"/>
+              <TextBlock Text="online hosts with metrics" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+            </StackPanel>
+          </Border>
+        </UniformGrid>
+
+        <Grid Grid.Row="1">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="1.15*"/>
+            <ColumnDefinition Width="1.35*"/>
+          </Grid.ColumnDefinitions>
+
+          <Border Style="{StaticResource Card}" Margin="0,0,8,0" Padding="0">
+            <DockPanel>
+              <Border DockPanel.Dock="Top" Background="#0B1220" Padding="14,12" CornerRadius="10,10,0,0">
+                <DockPanel>
+                  <TextBlock Text="Endpoint Fleet" Foreground="White" FontWeight="Bold" FontSize="15" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="AgentsFleetHint" DockPanel.Dock="Right" Foreground="#94A3B8" FontSize="11"
+                             Text="Select a host →" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                </DockPanel>
+              </Border>
+              <DataGrid x:Name="AgentsGrid" BorderThickness="0" SelectionChanged="AgentsGrid_SelectionChanged"
+                        HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                        AlternatingRowBackground="#F8FAFC" RowBackground="White"
+                        AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Header="●" Binding="{Binding OnlineGlyph}" Width="36"/>
+                  <DataGridTextColumn Header="Host" Binding="{Binding ComputerName}" Width="120"/>
+                  <DataGridTextColumn Header="IP" Binding="{Binding HostIp}" Width="100"/>
+                  <DataGridTextColumn Header="OS" Binding="{Binding Platform}" Width="60"/>
+                  <DataGridTextColumn Header="CPU" Binding="{Binding CpuText}" Width="55"/>
+                  <DataGridTextColumn Header="MEM" Binding="{Binding MemText}" Width="55"/>
+                  <DataGridTextColumn Header="DISK" Binding="{Binding DiskText}" Width="55"/>
+                  <DataGridTextColumn Header="Ver" Binding="{Binding Version}" Width="70"/>
+                  <DataGridTextColumn Header="Status" Binding="{Binding StatusShort}" Width="*"/>
+                </DataGrid.Columns>
+              </DataGrid>
+            </DockPanel>
+          </Border>
+
+          <!-- Detail panel -->
+          <Border Grid.Column="1" Style="{StaticResource Card}" Padding="0" Background="#0B1220">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18">
+              <StackPanel>
+                <DockPanel Margin="0,0,0,6">
+                  <StackPanel>
+                    <TextBlock x:Name="AgDetailHost" Text="Select an agent" Foreground="White" FontSize="22" FontWeight="Bold"/>
+                    <TextBlock x:Name="AgDetailSub" Text="Live inventory from Central heartbeats" Foreground="#94A3B8" FontSize="12" Margin="0,4,0,0"/>
+                  </StackPanel>
+                  <Border x:Name="AgDetailOnlineBadge" DockPanel.Dock="Right" Background="#064E3B" CornerRadius="12" Padding="12,6" VerticalAlignment="Top" Margin="8,0,0,0">
+                    <TextBlock x:Name="AgDetailOnlineText" Text="—" Foreground="#6EE7B7" FontWeight="SemiBold" FontSize="12"/>
+                  </Border>
+                </DockPanel>
+
+                <!-- Metric tiles -->
+                <UniformGrid Columns="4" Margin="0,12,0,8">
+                  <Border Background="#111827" CornerRadius="10" Margin="0,0,8,8" Padding="12,10">
+                    <StackPanel>
+                      <TextBlock Text="CPU" Foreground="#94A3B8" FontSize="10"/>
+                      <TextBlock x:Name="AgTileCpu" Text="—" Foreground="#38BDF8" FontSize="20" FontWeight="Bold"/>
+                    </StackPanel>
+                  </Border>
+                  <Border Background="#111827" CornerRadius="10" Margin="0,0,8,8" Padding="12,10">
+                    <StackPanel>
+                      <TextBlock Text="MEMORY" Foreground="#94A3B8" FontSize="10"/>
+                      <TextBlock x:Name="AgTileMem" Text="—" Foreground="#A78BFA" FontSize="20" FontWeight="Bold"/>
+                    </StackPanel>
+                  </Border>
+                  <Border Background="#111827" CornerRadius="10" Margin="0,0,8,8" Padding="12,10">
+                    <StackPanel>
+                      <TextBlock Text="DISK" Foreground="#94A3B8" FontSize="10"/>
+                      <TextBlock x:Name="AgTileDisk" Text="—" Foreground="#FBBF24" FontSize="20" FontWeight="Bold"/>
+                    </StackPanel>
+                  </Border>
+                  <Border Background="#111827" CornerRadius="10" Margin="0,0,0,8" Padding="12,10">
+                    <StackPanel>
+                      <TextBlock Text="LOAD / QUEUE" Foreground="#94A3B8" FontSize="10"/>
+                      <TextBlock x:Name="AgTileLoad" Text="—" Foreground="#34D399" FontSize="18" FontWeight="Bold"/>
+                    </StackPanel>
+                  </Border>
+                </UniformGrid>
+                <UniformGrid Columns="4" Margin="0,0,0,12">
+                  <Border Background="#111827" CornerRadius="10" Margin="0,0,8,0" Padding="12,10">
+                    <StackPanel>
+                      <TextBlock Text="NET RX" Foreground="#94A3B8" FontSize="10"/>
+                      <TextBlock x:Name="AgTileNetRx" Text="—" Foreground="#E2E8F0" FontSize="14" FontWeight="SemiBold"/>
+                    </StackPanel>
+                  </Border>
+                  <Border Background="#111827" CornerRadius="10" Margin="0,0,8,0" Padding="12,10">
+                    <StackPanel>
+                      <TextBlock Text="NET TX" Foreground="#94A3B8" FontSize="10"/>
+                      <TextBlock x:Name="AgTileNetTx" Text="—" Foreground="#E2E8F0" FontSize="14" FontWeight="SemiBold"/>
+                    </StackPanel>
+                  </Border>
+                  <Border Background="#111827" CornerRadius="10" Margin="0,0,8,0" Padding="12,10">
+                    <StackPanel>
+                      <TextBlock Text="DISK I/O R·W" Foreground="#94A3B8" FontSize="10"/>
+                      <TextBlock x:Name="AgTileIo" Text="—" Foreground="#E2E8F0" FontSize="14" FontWeight="SemiBold"/>
+                    </StackPanel>
+                  </Border>
+                  <Border Background="#111827" CornerRadius="10" Padding="12,10">
+                    <StackPanel>
+                      <TextBlock Text="AGENT RAM" Foreground="#94A3B8" FontSize="10"/>
+                      <TextBlock x:Name="AgTileWs" Text="—" Foreground="#E2E8F0" FontSize="14" FontWeight="SemiBold"/>
+                    </StackPanel>
+                  </Border>
+                </UniformGrid>
+
+                <!-- CPU history chart -->
+                <TextBlock Text="CPU HISTORY (heartbeat samples)" Foreground="#64748B" FontSize="10" FontWeight="SemiBold" Margin="0,4,0,6"/>
+                <Border Background="#111827" CornerRadius="10" Height="90" Margin="0,0,0,14" ClipToBounds="True">
+                  <Canvas x:Name="AgCpuChart" Margin="8,8,8,8"/>
+                </Border>
+
+                <TextBlock Text="IDENTITY &amp; HEALTH" Foreground="#64748B" FontSize="10" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                <Border Background="#111827" CornerRadius="10" Padding="14" Margin="0,0,0,12">
+                  <StackPanel>
+                    <TextBlock x:Name="AgDetailIdentity" Foreground="#CBD5E1" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap" LineHeight="18"
+                               Text="—"/>
+                  </StackPanel>
+                </Border>
+
+                <TextBlock Text="INTEGRITY · POLICY · CENTRAL" Foreground="#64748B" FontSize="10" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                <Border Background="#111827" CornerRadius="10" Padding="14" Margin="0,0,0,12">
+                  <StackPanel>
+                    <TextBlock x:Name="AgDetailIntegrity" Foreground="#CBD5E1" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap" LineHeight="18"
+                               Text="—"/>
+                  </StackPanel>
+                </Border>
+
+                <TextBlock Text="STATUS / METRICS LINE" Foreground="#64748B" FontSize="10" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                <Border Background="#111827" CornerRadius="10" Padding="14" Margin="0,0,0,8">
+                  <TextBlock x:Name="AgDetailMetricsLine" Foreground="#7DD3FC" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap" Text="—"/>
+                </Border>
+                <TextBlock x:Name="AgDetailError" Foreground="#FCA5A5" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
+              </StackPanel>
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </Grid>
 
       <!-- Catalog -->
       <Border x:Name="PageCatalog" Visibility="Collapsed" Margin="12" Style="{StaticResource Card}">
@@ -547,6 +707,11 @@
           <TextBlock Text="Connection Settings" FontWeight="Bold" FontSize="16" Margin="0,0,0,12"/>
           <TextBlock Text="Central Server URL" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6"/>
           <TextBox x:Name="SettingsUrlBox" Text="https://localhost:7443" Padding="10" Margin="0,0,0,12"/>
+          <TextBlock Text="Operator API Key (X-Cherry-Api-Key)" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6"/>
+          <TextBox x:Name="SettingsApiKeyBox" Text="" Padding="10" Margin="0,0,0,6"
+                   ToolTip="From Central secrets.json → OperatorApiKey (required when Security:RequireAuth=true)"/>
+          <TextBlock Text="Copy OperatorApiKey from C:\ProgramData\CherrySentinel\Server\secrets.json"
+                     Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,12" TextWrapping="Wrap"/>
           <TextBlock x:Name="KpiMode" Text="Mode: —" Margin="0,0,0,6"/>
           <TextBlock x:Name="LastRefreshText" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,16"/>
           <StackPanel Orientation="Horizontal">

@@ -98,6 +98,7 @@ builder.Services.AddSingleton<IScheduledTaskCollector, TaskSchedulerCollector>()
 builder.Services.AddSingleton<IDetectionEngine, RuleEngine>();
 builder.Services.AddSingleton<FirewallBlocker>();
 builder.Services.AddSingleton<IEvidenceCollector, EvidencePackager>();
+builder.Services.AddSingleton<RuntimePolicyState>();
 builder.Services.AddSingleton<IResponseExecutor, LocalResponseExecutor>();
 builder.Services.AddSingleton<ITransportClient, HttpsTransportClient>();
 builder.Services.AddSingleton<CherrySentinel.Transport.SyslogForwarder>();

@@ -9,7 +9,9 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using CherrySentinel.Dashboard.Services;
 using CherrySentinel.Shared;
+using CherrySentinel.Shared.Contracts;
 using CherrySentinel.Shared.Models;
+using System.Windows.Shapes;
 
 namespace CherrySentinel.Dashboard;
 
@@ -429,6 +431,7 @@ public partial class MainWindow : Window
     private async void ApplySettings_Click(object sender, RoutedEventArgs e)
     {
         ServerUrlBox.Text = SettingsUrlBox.Text.Trim();
+        _api.SetApiKey(SettingsApiKeyBox.Text.Trim());
         await RefreshAsync();
     }
 
@@ -438,10 +441,16 @@ public partial class MainWindow : Window
         {
             var url = ServerUrlBox.Text.Trim();
             SettingsUrlBox.Text = url;
-            if (!string.Equals(_api.BaseUrl, url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+            var apiKey = SettingsApiKeyBox.Text.Trim();
+            if (!string.Equals(_api.BaseUrl, url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(_api.ApiKey ?? "", apiKey, StringComparison.Ordinal))
             {
                 _api.Dispose();
-                _api = new CentralApiClient(url);
+                _api = new CentralApiClient(url, apiKey);
+            }
+            else
+            {
+                _api.SetApiKey(apiKey);
             }
 
             var health = await _api.GetHealthInfoAsync();
@@ -502,6 +511,13 @@ public partial class MainWindow : Window
         IncidentsGrid.ItemsSource = null;
         OverviewIncidentsGrid.ItemsSource = null;
         AgentsGrid.ItemsSource = null;
+        ClearAgentDetail();
+        AgKpiTotal.Text = "0";
+        AgKpiOnline.Text = "0";
+        AgKpiOffline.Text = "0 offline";
+        AgKpiWin.Text = "0";
+        AgKpiLinux.Text = "0";
+        AgKpiAvg.Text = "— / —";
         CatalogGrid.ItemsSource = null;
         CampaignsList.ItemsSource = null;
         TopSourcesList.ItemsSource = null;
@@ -562,7 +578,17 @@ public partial class MainWindow : Window
         _agents = agents;
         AgentsGrid.ItemsSource = agents;
         KpiAgents.Text = agents.Count.ToString();
+        BindAgentsFleetKpis(agents);
         RefreshFirewallAgentList(agents);
+        if (agents.Count > 0)
+        {
+            AgentsGrid.SelectedIndex = 0;
+            _ = ShowAgentDetailAsync(agents[0]);
+        }
+        else
+        {
+            ClearAgentDetail();
+        }
 
         CatalogGrid.ItemsSource = catalog;
 
@@ -643,20 +669,219 @@ public partial class MainWindow : Window
             var status = GetString(el, "status", "Status") ?? (online ? "Healthy" : "Offline");
             if (!online && !string.Equals(status, "Offline", StringComparison.OrdinalIgnoreCase))
                 status = "Offline";
-            rows.Add(new AgentRow(
-                GetString(el, "agentId", "AgentId") ?? "?",
-                GetString(el, "computerName", "ComputerName") ?? "?",
-                GetString(el, "hostIp", "HostIp"),
-                GetString(el, "agentVersion", "AgentVersion", "Version"),
-                status,
-                lastSeen,
-                online,
-                GetString(el, "platform", "Platform"),
-                GetString(el, "centralUrl", "CentralUrl"),
-                GetString(el, "lastError", "LastError")));
+            rows.Add(AgentRow.FromJson(el, status, lastSeen, online));
         }
 
         return rows.OrderByDescending(a => a.Online).ThenByDescending(a => a.LastSeenUtc).ToList();
+    }
+
+    private void BindAgentsFleetKpis(List<AgentRow> agents)
+    {
+        var online = agents.Count(a => a.Online);
+        AgKpiTotal.Text = agents.Count.ToString();
+        AgKpiOnline.Text = online.ToString();
+        AgKpiOffline.Text = $"{agents.Count - online} offline";
+        AgKpiWin.Text = agents.Count(a =>
+            string.Equals(a.Platform, "windows", StringComparison.OrdinalIgnoreCase)).ToString();
+        AgKpiLinux.Text = agents.Count(a =>
+            string.Equals(a.Platform, "linux", StringComparison.OrdinalIgnoreCase)).ToString();
+        var withCpu = agents.Where(a => a.Online && a.CpuPercent is not null).ToList();
+        var withMem = agents.Where(a => a.Online && a.MemUsedPercent is not null).ToList();
+        var avgCpu = withCpu.Count > 0 ? withCpu.Average(a => a.CpuPercent!.Value) : (double?)null;
+        var avgMem = withMem.Count > 0 ? withMem.Average(a => a.MemUsedPercent!.Value) : (double?)null;
+        AgKpiAvg.Text = $"{(avgCpu is double c ? $"{c:F0}%" : "—")} / {(avgMem is double m ? $"{m:F0}%" : "—")}";
+        AgentsFleetHint.Text = agents.Count == 0 ? "No agents yet" : "Select a host for full metrics →";
+    }
+
+    private async void AgentsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (AgentsGrid.SelectedItem is AgentRow row)
+            await ShowAgentDetailAsync(row);
+    }
+
+    private void ClearAgentDetail()
+    {
+        AgDetailHost.Text = "Select an agent";
+        AgDetailSub.Text = "Live inventory from Central heartbeats";
+        AgDetailOnlineText.Text = "—";
+        AgTileCpu.Text = AgTileMem.Text = AgTileDisk.Text = AgTileLoad.Text = "—";
+        AgTileNetRx.Text = AgTileNetTx.Text = AgTileIo.Text = AgTileWs.Text = "—";
+        AgDetailIdentity.Text = "—";
+        AgDetailIntegrity.Text = "—";
+        AgDetailMetricsLine.Text = "—";
+        AgDetailError.Text = "";
+        AgCpuChart.Children.Clear();
+    }
+
+    private async Task ShowAgentDetailAsync(AgentRow row)
+    {
+        // Immediate paint from list row
+        PaintAgentDetail(row, history: null);
+
+        try
+        {
+            var detail = await _api.GetAgentDetailAsync(row.AgentId, metricsTake: 90);
+            if (detail is null) return;
+            var enriched = AgentRow.FromInventory(detail);
+            // Keep selection stable
+            if (AgentsGrid.SelectedItem is AgentRow cur && cur.AgentId != enriched.AgentId)
+                return;
+            PaintAgentDetail(enriched, detail.MetricsHistory);
+        }
+        catch
+        {
+            // keep list-row paint
+        }
+    }
+
+    private void PaintAgentDetail(AgentRow a, List<AgentMetricsSample>? history)
+    {
+        AgDetailHost.Text = a.ComputerName;
+        AgDetailSub.Text = $"{a.Platform?.ToUpperInvariant() ?? "?"} · {a.HostIp ?? "no-ip"} · {a.AgentId}";
+        AgDetailOnlineText.Text = a.Online ? "ONLINE" : "OFFLINE";
+        AgDetailOnlineBadge.Background = new SolidColorBrush(
+            a.Online ? Color.FromRgb(0x06, 0x4E, 0x3B) : Color.FromRgb(0x7F, 0x1D, 0x1D));
+        AgDetailOnlineText.Foreground = new SolidColorBrush(
+            a.Online ? Color.FromRgb(0x6E, 0xE7, 0xB7) : Color.FromRgb(0xFC, 0xA5, 0xA5));
+
+        AgTileCpu.Text = a.CpuPercent is double c ? $"{c:F1}%" : "—";
+        AgTileMem.Text = a.MemUsedPercent is double m ? $"{m:F1}%" : "—";
+        AgTileDisk.Text = a.DiskUsedPercent is double d ? $"{d:F1}%" : "—";
+        AgTileLoad.Text = a.LoadAverage1 is double l
+            ? $"{l:F2} / q={a.QueueDepth}"
+            : $"q={a.QueueDepth}";
+        AgTileNetRx.Text = FormatRate(a.NetworkRxBytesPerSec);
+        AgTileNetTx.Text = FormatRate(a.NetworkTxBytesPerSec);
+        AgTileIo.Text = $"{FormatRate(a.DiskReadBytesPerSec)} · {FormatRate(a.DiskWriteBytesPerSec)}";
+        AgTileWs.Text = a.WorkingSetBytes > 0 ? FormatBytes(a.WorkingSetBytes) : "—";
+
+        var offline = a.Online ? "live" : $"offline {a.OfflineSeconds}s";
+        AgDetailIdentity.Text =
+            $"AgentId     {a.AgentId}\n" +
+            $"Host        {a.ComputerName}\n" +
+            $"IP          {a.HostIp ?? "—"}\n" +
+            $"Platform    {a.Platform ?? "—"}\n" +
+            $"OS          {a.OsVersion ?? "—"}\n" +
+            $"Version     {a.Version ?? "—"}\n" +
+            $"LastSeen    {a.LastSeenUtc:yyyy-MM-dd HH:mm:ss} UTC ({offline})\n" +
+            $"DB size     {FormatBytes(a.DatabaseSizeBytes)}\n" +
+            $"Clock skew  {a.ClockSkewSeconds:F2}s\n" +
+            $"Host RAM    {(a.HostMemUsedBytes is long u && a.HostMemTotalBytes is long t ? $"{FormatBytes(u)} / {FormatBytes(t)}" : "—")}";
+
+        var sha = string.IsNullOrWhiteSpace(a.BinarySha256) ? "—" :
+            (a.BinarySha256.Length > 24 ? a.BinarySha256[..24] + "…" : a.BinarySha256);
+        AgDetailIntegrity.Text =
+            $"SHA-256     {sha}\n" +
+            $"Signed      {(a.IsBinarySigned is true ? "yes" : a.IsBinarySigned is false ? "no" : "—")}\n" +
+            $"Policy ver  {a.PolicyVersion?.ToString() ?? "—"}\n" +
+            $"Central URL {a.CentralUrl ?? "—"}";
+
+        AgDetailMetricsLine.Text = string.IsNullOrWhiteSpace(a.MetricsSummary)
+            ? (a.Status ?? "—")
+            : a.MetricsSummary;
+        AgDetailError.Text = string.IsNullOrWhiteSpace(a.LastError) ? "" : "Last error: " + a.LastError;
+
+        DrawCpuHistory(history ?? a.History);
+    }
+
+    private void DrawCpuHistory(List<AgentMetricsSample>? samples)
+    {
+        AgCpuChart.Children.Clear();
+        if (samples is null || samples.Count < 2)
+        {
+            AgCpuChart.Children.Add(new TextBlock
+            {
+                Text = "Waiting for metrics history (heartbeats)…",
+                Foreground = new SolidColorBrush(Color.FromRgb(0x64, 0x74, 0x8B)),
+                FontSize = 11,
+                Margin = new Thickness(8)
+            });
+            return;
+        }
+
+        // samples newest-first → reverse for time axis
+        var pts = samples.Where(s => s.CpuPercent is not null).Reverse().Take(90).ToList();
+        if (pts.Count < 2)
+        {
+            // fall back to mem if no cpu
+            pts = samples.Where(s => s.MemUsedPercent is not null).Reverse().Take(90)
+                .Select(s => new AgentMetricsSample { CpuPercent = s.MemUsedPercent, TimestampUtc = s.TimestampUtc }).ToList();
+        }
+
+        if (pts.Count < 2) return;
+
+        AgCpuChart.UpdateLayout();
+        var w = Math.Max(40, AgCpuChart.ActualWidth > 10 ? AgCpuChart.ActualWidth : 320);
+        var h = Math.Max(40, AgCpuChart.ActualHeight > 10 ? AgCpuChart.ActualHeight : 74);
+        var poly = new System.Windows.Shapes.Polyline
+        {
+            Stroke = new SolidColorBrush(Color.FromRgb(0x38, 0xBD, 0xF8)),
+            StrokeThickness = 2,
+            Fill = new SolidColorBrush(Color.FromArgb(0x33, 0x38, 0xBD, 0xF8))
+        };
+        var n = pts.Count;
+        for (var i = 0; i < n; i++)
+        {
+            var v = Math.Clamp(pts[i].CpuPercent ?? 0, 0, 100);
+            var x = n == 1 ? 0 : i * (w - 4) / (n - 1);
+            var y = h - 4 - (v / 100.0) * (h - 8);
+            poly.Points.Add(new Point(x, y));
+        }
+
+        // close fill to baseline
+        poly.Points.Add(new Point(w - 4, h - 2));
+        poly.Points.Add(new Point(0, h - 2));
+        AgCpuChart.Children.Add(poly);
+    }
+
+    private static string FormatRate(double? bps)
+    {
+        if (bps is null) return "—";
+        var v = bps.Value;
+        if (v >= 1_048_576) return $"{v / 1_048_576:F2} MB/s";
+        if (v >= 1024) return $"{v / 1024:F1} KB/s";
+        return $"{v:F0} B/s";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1_073_741_824) return $"{bytes / 1_073_741_824.0:F2} GB";
+        if (bytes >= 1_048_576) return $"{bytes / 1_048_576.0:F1} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:F0} KB";
+        return $"{bytes} B";
+    }
+
+    private static double? GetDouble(JsonElement el, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            if (el.TryGetProperty(n, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetDouble(out var d))
+                return d;
+        }
+
+        return null;
+    }
+
+    private static long GetLong(JsonElement el, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            if (el.TryGetProperty(n, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetInt64(out var l))
+                return l;
+        }
+
+        return 0;
+    }
+
+    private static int? GetInt(JsonElement el, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            if (el.TryGetProperty(n, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var i))
+                return i;
+        }
+
+        return null;
     }
 
     private static bool? GetBool(JsonElement el, params string[] names)
@@ -835,17 +1060,123 @@ public partial class MainWindow : Window
 
     private sealed record Kv(string Key, int Value);
 
-    private sealed record AgentRow(
-        string AgentId,
-        string ComputerName,
-        string? HostIp,
-        string? Version,
-        string? Status,
-        DateTimeOffset LastSeenUtc,
-        bool Online = true,
-        string? Platform = null,
-        string? CentralUrl = null,
-        string? LastError = null);
+    private sealed class AgentRow
+    {
+        public string AgentId { get; init; } = "?";
+        public string ComputerName { get; init; } = "?";
+        public string? HostIp { get; init; }
+        public string? Version { get; init; }
+        public string? Status { get; init; }
+        public DateTimeOffset LastSeenUtc { get; init; }
+        public bool Online { get; init; } = true;
+        public string? Platform { get; init; }
+        public string? CentralUrl { get; init; }
+        public string? LastError { get; init; }
+        public string? OsVersion { get; init; }
+        public double? CpuPercent { get; init; }
+        public double? MemUsedPercent { get; init; }
+        public double? DiskUsedPercent { get; init; }
+        public double? NetworkRxBytesPerSec { get; init; }
+        public double? NetworkTxBytesPerSec { get; init; }
+        public double? DiskReadBytesPerSec { get; init; }
+        public double? DiskWriteBytesPerSec { get; init; }
+        public double? LoadAverage1 { get; init; }
+        public long QueueDepth { get; init; }
+        public long WorkingSetBytes { get; init; }
+        public long DatabaseSizeBytes { get; init; }
+        public double ClockSkewSeconds { get; init; }
+        public string? BinarySha256 { get; init; }
+        public bool? IsBinarySigned { get; init; }
+        public int? PolicyVersion { get; init; }
+        public long? HostMemUsedBytes { get; init; }
+        public long? HostMemTotalBytes { get; init; }
+        public string? MetricsSummary { get; init; }
+        public int OfflineSeconds { get; init; }
+        public List<AgentMetricsSample> History { get; init; } = [];
+
+        public string OnlineGlyph => Online ? "●" : "○";
+        public string CpuText => CpuPercent is double c ? $"{c:F0}%" : "—";
+        public string MemText => MemUsedPercent is double m ? $"{m:F0}%" : "—";
+        public string DiskText => DiskUsedPercent is double d ? $"{d:F0}%" : "—";
+        public string StatusShort
+        {
+            get
+            {
+                var s = Status ?? "";
+                if (s.Length > 40) return s[..40] + "…";
+                return s;
+            }
+        }
+
+        public static AgentRow FromJson(JsonElement el, string status, DateTimeOffset lastSeen, bool online) => new()
+        {
+            AgentId = GetString(el, "agentId", "AgentId") ?? "?",
+            ComputerName = GetString(el, "computerName", "ComputerName") ?? "?",
+            HostIp = GetString(el, "hostIp", "HostIp"),
+            Version = GetString(el, "agentVersion", "AgentVersion", "Version"),
+            Status = status,
+            LastSeenUtc = lastSeen,
+            Online = online,
+            Platform = GetString(el, "platform", "Platform"),
+            CentralUrl = GetString(el, "centralUrl", "CentralUrl"),
+            LastError = GetString(el, "lastError", "LastError"),
+            OsVersion = GetString(el, "osVersion", "OsVersion"),
+            CpuPercent = GetDouble(el, "cpuPercent", "CpuPercent"),
+            MemUsedPercent = GetDouble(el, "memUsedPercent", "MemUsedPercent"),
+            DiskUsedPercent = GetDouble(el, "diskUsedPercent", "DiskUsedPercent"),
+            NetworkRxBytesPerSec = GetDouble(el, "networkRxBytesPerSec", "NetworkRxBytesPerSec"),
+            NetworkTxBytesPerSec = GetDouble(el, "networkTxBytesPerSec", "NetworkTxBytesPerSec"),
+            DiskReadBytesPerSec = GetDouble(el, "diskReadBytesPerSec", "DiskReadBytesPerSec"),
+            DiskWriteBytesPerSec = GetDouble(el, "diskWriteBytesPerSec", "DiskWriteBytesPerSec"),
+            LoadAverage1 = GetDouble(el, "loadAverage1", "LoadAverage1"),
+            QueueDepth = GetLong(el, "queueDepth", "QueueDepth"),
+            WorkingSetBytes = GetLong(el, "workingSetBytes", "WorkingSetBytes"),
+            DatabaseSizeBytes = GetLong(el, "databaseSizeBytes", "DatabaseSizeBytes"),
+            ClockSkewSeconds = GetDouble(el, "clockSkewSeconds", "ClockSkewSeconds") ?? 0,
+            BinarySha256 = GetString(el, "binarySha256", "BinarySha256"),
+            IsBinarySigned = GetBool(el, "isBinarySigned", "IsBinarySigned"),
+            PolicyVersion = GetInt(el, "policyVersion", "PolicyVersion"),
+            HostMemUsedBytes = GetLong(el, "hostMemUsedBytes", "HostMemUsedBytes") is long hu and > 0 ? hu : null,
+            HostMemTotalBytes = GetLong(el, "hostMemTotalBytes", "HostMemTotalBytes") is long ht and > 0 ? ht : null,
+            MetricsSummary = GetString(el, "metricsSummary", "MetricsSummary"),
+            OfflineSeconds = GetInt(el, "offlineSeconds", "OfflineSeconds") ?? 0
+        };
+
+        public static AgentRow FromInventory(AgentInventoryItem i) => new()
+        {
+            AgentId = i.AgentId,
+            ComputerName = i.ComputerName,
+            HostIp = i.HostIp,
+            Version = i.AgentVersion,
+            Status = i.Status,
+            LastSeenUtc = i.LastSeenUtc,
+            Online = i.Online,
+            Platform = i.Platform,
+            CentralUrl = i.CentralUrl,
+            LastError = i.LastError,
+            OsVersion = i.OsVersion,
+            CpuPercent = i.CpuPercent,
+            MemUsedPercent = i.MemUsedPercent,
+            DiskUsedPercent = i.DiskUsedPercent,
+            NetworkRxBytesPerSec = i.NetworkRxBytesPerSec,
+            NetworkTxBytesPerSec = i.NetworkTxBytesPerSec,
+            DiskReadBytesPerSec = i.DiskReadBytesPerSec,
+            DiskWriteBytesPerSec = i.DiskWriteBytesPerSec,
+            LoadAverage1 = i.LoadAverage1,
+            QueueDepth = i.QueueDepth,
+            WorkingSetBytes = i.WorkingSetBytes,
+            DatabaseSizeBytes = i.DatabaseSizeBytes,
+            ClockSkewSeconds = i.ClockSkewSeconds,
+            BinarySha256 = i.BinarySha256,
+            IsBinarySigned = i.IsBinarySigned,
+            PolicyVersion = i.PolicyVersion,
+            HostMemUsedBytes = i.HostMemUsedBytes,
+            HostMemTotalBytes = i.HostMemTotalBytes,
+            MetricsSummary = i.MetricsSummary,
+            OfflineSeconds = i.OfflineSeconds,
+            History = i.MetricsHistory ?? []
+        };
+    }
 
     private sealed class DeadlineTaskRow
     {

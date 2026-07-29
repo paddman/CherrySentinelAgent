@@ -1,8 +1,10 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CherrySentinel.Core.Abstractions;
 using CherrySentinel.Core.Compatibility;
 using CherrySentinel.Core.Configuration;
 using CherrySentinel.Core.Identity;
+using CherrySentinel.Core.Security;
 using CherrySentinel.Shared.Contracts;
 using CherrySentinel.Shared.Enums;
 using CherrySentinel.Shared.Models;
@@ -31,6 +33,7 @@ public sealed class AgentWorker : BackgroundService
     private readonly IResponseExecutor _responseExecutor;
     private readonly ITransportClient _transport;
     private readonly CherrySentinel.Transport.SyslogForwarder _syslog;
+    private readonly RuntimePolicyState _runtimePolicy;
 
     private readonly List<SecurityEventRecord> _eventBuffer = [];
     private readonly List<NetworkConnectionRecord> _connectionBuffer = [];
@@ -45,6 +48,8 @@ public sealed class AgentWorker : BackgroundService
     private DateTimeOffset? _lastAlertUtc;
     private DateTimeOffset? _lastActivityUtc;
     private bool _centralReachable;
+    private string? _binarySha256;
+    private bool? _isBinarySigned;
 
     public AgentWorker(
         ILogger<AgentWorker> logger,
@@ -64,7 +69,8 @@ public sealed class AgentWorker : BackgroundService
         IDetectionEngine detectionEngine,
         IResponseExecutor responseExecutor,
         ITransportClient transport,
-        CherrySentinel.Transport.SyslogForwarder syslog)
+        CherrySentinel.Transport.SyslogForwarder syslog,
+        RuntimePolicyState runtimePolicy)
     {
         _logger = logger;
         _agentOptions = agentOptions.Value;
@@ -84,6 +90,7 @@ public sealed class AgentWorker : BackgroundService
         _responseExecutor = responseExecutor;
         _transport = transport;
         _syslog = syslog;
+        _runtimePolicy = runtimePolicy;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -99,6 +106,9 @@ public sealed class AgentWorker : BackgroundService
 
         AgentIdentity.EnsureAgentId(_agentOptions);
         Directory.CreateDirectory(_agentOptions.DataDirectory);
+        _runtimePolicy.SeedFromLocal(_agentOptions, _responseOptions);
+        ProbeSelfIntegrity();
+        LoadApiKeyFromCredentialFile();
 
         await _store.InitializeAsync(stoppingToken);
         await _detectionEngine.InitializeAsync(stoppingToken);
@@ -121,7 +131,7 @@ public sealed class AgentWorker : BackgroundService
         var detectTask = RunLoopAsync("detect", TimeSpan.FromSeconds(Math.Max(5, _detectionOptions.EvaluationIntervalSeconds)), EvaluateDetectionsAsync, stoppingToken);
         var maintTask = RunLoopAsync("maintenance", TimeSpan.FromMinutes(Math.Max(5, _storageOptions.MaintenanceIntervalMinutes)), () => _store.RunMaintenanceAsync(stoppingToken), stoppingToken);
 
-        // Immediate central probe + first heartbeat so Dashboard sees this host quickly (non-blocking for loops).
+        // Immediate enroll + probe + first heartbeat so Dashboard sees this host quickly (non-blocking for loops).
         _ = Task.Run(async () =>
         {
             try
@@ -130,6 +140,7 @@ public sealed class AgentWorker : BackgroundService
                 _logger.LogInformation("Central reachable={Reachable} url={Url}", _centralReachable, _centralOptions.Url);
                 if (_centralReachable)
                 {
+                    await RegisterWithCentralAsync(stoppingToken);
                     await HeartbeatAsync();
                 }
             }
@@ -380,6 +391,7 @@ public sealed class AgentWorker : BackgroundService
     private async Task HeartbeatAsync()
     {
         using var proc = System.Diagnostics.Process.GetCurrentProcess();
+        var (diskPct, memPct, hostMemUsed, hostMemTotal) = SampleWindowsHostMetrics();
         var hb = new AgentHeartbeat
         {
             AgentId = _agentOptions.AgentId,
@@ -394,7 +406,17 @@ public sealed class AgentWorker : BackgroundService
             HostIp = TryGetPrimaryIpv4(),
             CentralUrl = _centralOptions.Url,
             Platform = "windows",
-            LastError = _lastOutboundError
+            LastError = _lastOutboundError,
+            BinarySha256 = _binarySha256,
+            IsBinarySigned = _isBinarySigned,
+            AppliedPolicyVersion = _runtimePolicy.PolicyVersion > 0 ? _runtimePolicy.PolicyVersion : null,
+            MemUsedPercent = memPct,
+            DiskUsedPercent = diskPct,
+            HostMemUsedBytes = hostMemUsed,
+            HostMemTotalBytes = hostMemTotal,
+            MetricsSummary = diskPct is double d && memPct is double m
+                ? $"mem={m:F1}% disk={d:F1}% ws={proc.WorkingSet64 / (1024 * 1024)}MB"
+                : $"ws={proc.WorkingSet64 / (1024 * 1024)}MB"
         };
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Max(5, _centralOptions.TimeoutSeconds))))
         {
@@ -405,6 +427,16 @@ public sealed class AgentWorker : BackgroundService
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Max(5, _centralOptions.TimeoutSeconds))))
         {
             hbResp = await _transport.SendHeartbeatAsync(hb, cts.Token);
+        }
+
+        if (hbResp?.Policy is { } policy)
+        {
+            if (_runtimePolicy.TryApply(policy))
+            {
+                _logger.LogWarning(
+                    "Central policy applied id={Id} v{Ver} mode={Mode} detectOnly={Det}",
+                    policy.PolicyId, policy.PolicyVersion, policy.Mode, policy.DetectOnly);
+            }
         }
 
         if (hbResp?.PendingActions is { Count: > 0 } actions)
@@ -432,6 +464,175 @@ public sealed class AgentWorker : BackgroundService
         }
 
         // Status loop owns status.json — never block heartbeat on status I/O.
+    }
+
+    private async Task RegisterWithCentralAsync(CancellationToken ct)
+    {
+        try
+        {
+            var req = new AgentRegistrationRequest
+            {
+                AgentId = _agentOptions.AgentId,
+                ComputerName = _agentOptions.ComputerName,
+                AgentVersion = _agentOptions.Version,
+                OsVersion = WindowsCompatibility.OsVersion.ToString(),
+                HostIp = TryGetPrimaryIpv4(),
+                EnrollmentToken = string.IsNullOrWhiteSpace(_centralOptions.EnrollmentToken)
+                    ? null
+                    : _centralOptions.EnrollmentToken,
+                BinarySha256 = _binarySha256,
+                IsBinarySigned = _isBinarySigned,
+                Platform = "windows",
+                // Rotate only when we have no API key yet
+                RotateApiKey = string.IsNullOrWhiteSpace(_centralOptions.ApiKey)
+            };
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, _centralOptions.TimeoutSeconds)));
+            var reg = await _transport.RegisterAsync(req, cts.Token);
+            if (reg is null)
+            {
+                _logger.LogWarning("Register failed or Central unreachable");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(reg.AgentApiKey))
+            {
+                _centralOptions.ApiKey = reg.AgentApiKey;
+                _transport.SetApiKey(reg.AgentApiKey);
+                PersistApiKey(reg.AgentApiKey);
+                _logger.LogInformation("Agent API key issued/updated and stored");
+            }
+
+            if (reg.Policy is not null && _runtimePolicy.TryApply(reg.Policy))
+            {
+                _logger.LogInformation("Policy from register applied v{Ver}", reg.Policy.PolicyVersion);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RegisterWithCentral failed");
+        }
+    }
+
+    private void ProbeSelfIntegrity()
+    {
+        try
+        {
+            var path = Environment.ProcessPath
+                       ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                path = Path.Combine(AppContext.BaseDirectory, "CherrySentinel.Agent.exe");
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+            _binarySha256 = UpdatePackageValidator.ComputeSha256(path);
+            _isBinarySigned = UpdatePackageValidator.HasDigitalSignature(path);
+            _logger.LogInformation("Agent binary sha256={Sha} signed={Signed}",
+                _binarySha256?[..Math.Min(16, _binarySha256.Length)], _isBinarySigned);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Self integrity probe failed");
+        }
+    }
+
+    private static (double? DiskPct, double? MemPct, long? HostMemUsed, long? HostMemTotal) SampleWindowsHostMetrics()
+    {
+        double? diskPct = null;
+        try
+        {
+            var sys = DriveInfo.GetDrives().FirstOrDefault(d =>
+                d.IsReady && d.Name.StartsWith(Path.GetPathRoot(Environment.SystemDirectory) ?? "C", StringComparison.OrdinalIgnoreCase));
+            if (sys is { TotalSize: > 0 })
+                diskPct = 100.0 * (1.0 - (double)sys.AvailableFreeSpace / sys.TotalSize);
+        }
+        catch { /* ignore */ }
+
+        double? memPct = null;
+        long? used = null, total = null;
+        try
+        {
+            var info = GC.GetGCMemoryInfo();
+            total = info.TotalAvailableMemoryBytes;
+            if (total is > 0)
+            {
+                // Approximate host pressure via available memory reported to GC
+                var available = info.TotalAvailableMemoryBytes; // not free; best-effort
+                // Prefer GlobalMemoryStatusEx via working set ratio is weak — use TotalAvailable as total
+                used = null;
+                memPct = null;
+            }
+        }
+        catch { /* ignore */ }
+
+        try
+        {
+            // Environment.WorkingSet is process; for host use PerformanceCounter when available is heavy —
+            // report process working set share only as HostMemUsed when total known.
+            using var p = System.Diagnostics.Process.GetCurrentProcess();
+            used = p.WorkingSet64;
+            if (total is > 0 && used is > 0)
+                memPct = Math.Clamp(100.0 * used.Value / total.Value, 0, 100);
+        }
+        catch { /* ignore */ }
+
+        return (diskPct, memPct, used, total);
+    }
+
+    private string CredentialPath =>
+        Path.Combine(_agentOptions.DataDirectory, "agent.credential");
+
+    private void LoadApiKeyFromCredentialFile()
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_centralOptions.ApiKey))
+            {
+                _transport.SetApiKey(_centralOptions.ApiKey);
+                return;
+            }
+
+            if (!File.Exists(CredentialPath)) return;
+            var key = File.ReadAllText(CredentialPath).Trim();
+            if (string.IsNullOrWhiteSpace(key)) return;
+            _centralOptions.ApiKey = key;
+            _transport.SetApiKey(key);
+            _logger.LogInformation("Loaded agent API key from credential file");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Load API key credential failed");
+        }
+    }
+
+    private void PersistApiKey(string apiKey)
+    {
+        try
+        {
+            Directory.CreateDirectory(_agentOptions.DataDirectory);
+            File.WriteAllText(CredentialPath, apiKey);
+            try
+            {
+                // Restrict ACL best-effort on Windows
+                var fi = new FileInfo(CredentialPath);
+                var sec = fi.GetAccessControl();
+                // leave default; installers run as SYSTEM
+            }
+            catch { /* ignore ACL */ }
+
+            // Also write into appsettings.json Server:ApiKey when present
+            var appsettings = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+            if (File.Exists(appsettings))
+            {
+                var node = JsonNode.Parse(File.ReadAllText(appsettings)) as JsonObject ?? new JsonObject();
+                var server = node["Server"] as JsonObject ?? new JsonObject();
+                server["ApiKey"] = apiKey;
+                node["Server"] = server;
+                File.WriteAllText(appsettings, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Persist API key failed");
+        }
     }
 
     private async Task WriteStatusFileAsync() => await WriteStatusFileAsync(stopping: false);

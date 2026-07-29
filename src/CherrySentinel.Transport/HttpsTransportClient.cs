@@ -38,6 +38,44 @@ public sealed class HttpsTransportClient : ITransportClient, IDisposable
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         _http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("CherrySentinel-Agent/1.0");
+        if (!string.IsNullOrWhiteSpace(_options.ApiKey))
+            SetApiKey(_options.ApiKey);
+    }
+
+    public void SetApiKey(string? apiKey)
+    {
+        _http.DefaultRequestHeaders.Remove("X-Cherry-Api-Key");
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Cherry-Api-Key", apiKey.Trim());
+    }
+
+    public async Task<AgentRegistrationResponse?> RegisterAsync(AgentRegistrationRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await _http.PostAsJsonAsync("api/v1/agents/register", request, JsonOptions, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning("Register failed: {Status} {Body}", response.StatusCode, body);
+                return null;
+            }
+
+            var reg = await response.Content.ReadFromJsonAsync<AgentRegistrationResponse>(JsonOptions, cancellationToken);
+            if (reg?.Accepted == true && !string.IsNullOrWhiteSpace(reg.AgentApiKey))
+            {
+                SetApiKey(reg.AgentApiKey);
+                _options.ApiKey = reg.AgentApiKey;
+            }
+
+            _backoff.Reset();
+            return reg;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Register error to {Base}", _http.BaseAddress);
+            return null;
+        }
     }
 
     private static HttpClientHandler CreateHandler(CentralServerOptions options)

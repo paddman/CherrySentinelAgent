@@ -175,6 +175,23 @@ public sealed class SqliteCentralStore : ICentralStore
                     payload TEXT NOT NULL,
                     last_seen_utc TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp_utc TEXT NOT NULL,
+                    actor TEXT,
+                    action TEXT,
+                    target TEXT,
+                    result TEXT,
+                    detail_json TEXT,
+                    source_ip TEXT
+                );
+                CREATE INDEX IF NOT EXISTS ix_audit_ts ON audit_log(timestamp_utc);
+                CREATE TABLE IF NOT EXISTS agent_policies (
+                    policy_id TEXT PRIMARY KEY,
+                    version INTEGER NOT NULL,
+                    json TEXT NOT NULL,
+                    updated_utc TEXT NOT NULL
+                );
                 """;
             await cmd.ExecuteNonQueryAsync();
 
@@ -183,7 +200,22 @@ public sealed class SqliteCentralStore : ICentralStore
                      {
                          "ALTER TABLE agents ADD COLUMN central_url TEXT;",
                          "ALTER TABLE agents ADD COLUMN platform TEXT;",
-                         "ALTER TABLE agents ADD COLUMN last_error TEXT;"
+                         "ALTER TABLE agents ADD COLUMN last_error TEXT;",
+                         "ALTER TABLE agents ADD COLUMN agent_api_key_hash TEXT;",
+                         "ALTER TABLE agents ADD COLUMN binary_sha256 TEXT;",
+                         "ALTER TABLE agents ADD COLUMN is_binary_signed INTEGER;",
+                         "ALTER TABLE agents ADD COLUMN policy_version INTEGER;",
+                         "ALTER TABLE agents ADD COLUMN cpu_percent REAL;",
+                         "ALTER TABLE agents ADD COLUMN mem_used_percent REAL;",
+                         "ALTER TABLE agents ADD COLUMN disk_used_percent REAL;",
+                         "ALTER TABLE agents ADD COLUMN net_rx_bps REAL;",
+                         "ALTER TABLE agents ADD COLUMN net_tx_bps REAL;",
+                         "ALTER TABLE agents ADD COLUMN disk_read_bps REAL;",
+                         "ALTER TABLE agents ADD COLUMN disk_write_bps REAL;",
+                         "ALTER TABLE agents ADD COLUMN load1 REAL;",
+                         "ALTER TABLE agents ADD COLUMN host_mem_used INTEGER;",
+                         "ALTER TABLE agents ADD COLUMN host_mem_total INTEGER;",
+                         "ALTER TABLE agents ADD COLUMN metrics_summary TEXT;"
                      })
             {
                 try
@@ -195,6 +227,48 @@ public sealed class SqliteCentralStore : ICentralStore
                 catch
                 {
                     // column already exists
+                }
+            }
+
+            await using (var metricsTbl = conn.CreateCommand())
+            {
+                metricsTbl.CommandText =
+                    """
+                    CREATE TABLE IF NOT EXISTS agent_metrics (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        agent_id TEXT NOT NULL,
+                        timestamp_utc TEXT NOT NULL,
+                        cpu REAL,
+                        mem_pct REAL,
+                        disk_pct REAL,
+                        net_rx REAL,
+                        net_tx REAL,
+                        io_r REAL,
+                        io_w REAL,
+                        load1 REAL,
+                        queue_depth INTEGER,
+                        working_set INTEGER,
+                        status TEXT
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_agent_metrics_agent_ts ON agent_metrics(agent_id, timestamp_utc);
+                    """;
+                await metricsTbl.ExecuteNonQueryAsync();
+            }
+
+            // Default policy if missing
+            await using (var seed = conn.CreateCommand())
+            {
+                seed.CommandText = "SELECT COUNT(1) FROM agent_policies WHERE policy_id='default';";
+                var count = Convert.ToInt64(await seed.ExecuteScalarAsync() ?? 0L);
+                if (count == 0)
+                {
+                    var defaultPolicy = new AgentPolicy { PolicyId = "default", PolicyVersion = 1, Mode = "Ids", DetectOnly = true };
+                    await using var ins = conn.CreateCommand();
+                    ins.CommandText =
+                        "INSERT INTO agent_policies(policy_id, version, json, updated_utc) VALUES ('default', 1, $j, $t);";
+                    ins.Parameters.AddWithValue("$j", JsonSerializer.Serialize(defaultPolicy, JsonOptions));
+                    ins.Parameters.AddWithValue("$t", DateTimeOffset.UtcNow.ToString("O"));
+                    await ins.ExecuteNonQueryAsync();
                 }
             }
 
@@ -217,14 +291,26 @@ public sealed class SqliteCentralStore : ICentralStore
         await UpsertAgentCoreAsync(hb.AgentId, hb.ComputerName, hb.AgentVersion, hb.OsVersion,
             hb.LocalQueueDepth, hb.DatabaseSizeBytes, hb.Status, hb.WorkingSetBytes, hb.ClockSkewSeconds,
             hostIp: hb.HostIp, thumb: null, ts: hb.TimestampUtc,
-            centralUrl: hb.CentralUrl, platform: hb.Platform, lastError: hb.LastError);
+            centralUrl: hb.CentralUrl, platform: hb.Platform, lastError: hb.LastError,
+            binarySha256: hb.BinarySha256, isSigned: hb.IsBinarySigned, policyVersion: hb.AppliedPolicyVersion,
+            cpu: hb.CpuPercentEstimate, memPct: hb.MemUsedPercent, diskPct: hb.DiskUsedPercent,
+            netRx: hb.NetworkRxBytesPerSec, netTx: hb.NetworkTxBytesPerSec,
+            ioR: hb.DiskReadBytesPerSec, ioW: hb.DiskWriteBytesPerSec, load1: hb.LoadAverage1,
+            hostMemUsed: hb.HostMemUsedBytes, hostMemTotal: hb.HostMemTotalBytes,
+            metricsSummary: hb.MetricsSummary);
+        await SaveAgentMetricsAsync(hb);
     }
 
     private async Task UpsertAgentCoreAsync(
         string agentId, string computerName, string? version, string? os,
         long queue, long db, string status, long ws, double skew,
         string? hostIp, string? thumb, DateTimeOffset? ts = null,
-        string? centralUrl = null, string? platform = null, string? lastError = null)
+        string? centralUrl = null, string? platform = null, string? lastError = null,
+        string? binarySha256 = null, bool? isSigned = null, int? policyVersion = null,
+        double? cpu = null, double? memPct = null, double? diskPct = null,
+        double? netRx = null, double? netTx = null, double? ioR = null, double? ioW = null,
+        double? load1 = null, long? hostMemUsed = null, long? hostMemTotal = null,
+        string? metricsSummary = null)
     {
         var when = (ts ?? DateTimeOffset.UtcNow).ToString("O");
         await _gate.WaitAsync();
@@ -236,8 +322,11 @@ public sealed class SqliteCentralStore : ICentralStore
                 """
                 INSERT INTO agents(agent_id, computer_name, agent_version, os_version, host_ip, certificate_thumbprint,
                     last_seen_utc, queue_depth, db_size_bytes, status, working_set_bytes, clock_skew_seconds,
-                    central_url, platform, last_error)
-                VALUES ($id, $cn, $ver, $os, $ip, $thumb, $ts, $q, $db, $st, $ws, $skew, $curl, $plat, $err)
+                    central_url, platform, last_error, binary_sha256, is_binary_signed, policy_version,
+                    cpu_percent, mem_used_percent, disk_used_percent, net_rx_bps, net_tx_bps, disk_read_bps, disk_write_bps,
+                    load1, host_mem_used, host_mem_total, metrics_summary)
+                VALUES ($id, $cn, $ver, $os, $ip, $thumb, $ts, $q, $db, $st, $ws, $skew, $curl, $plat, $err, $sha, $sig, $pv,
+                    $cpu, $mem, $disk, $nrx, $ntx, $ior, $iow, $load, $hmu, $hmt, $ms)
                 ON CONFLICT(agent_id) DO UPDATE SET
                     computer_name=excluded.computer_name,
                     agent_version=excluded.agent_version,
@@ -252,7 +341,21 @@ public sealed class SqliteCentralStore : ICentralStore
                     clock_skew_seconds=excluded.clock_skew_seconds,
                     central_url=COALESCE(excluded.central_url, agents.central_url),
                     platform=COALESCE(excluded.platform, agents.platform),
-                    last_error=excluded.last_error;
+                    last_error=excluded.last_error,
+                    binary_sha256=COALESCE(excluded.binary_sha256, agents.binary_sha256),
+                    is_binary_signed=COALESCE(excluded.is_binary_signed, agents.is_binary_signed),
+                    policy_version=COALESCE(excluded.policy_version, agents.policy_version),
+                    cpu_percent=COALESCE(excluded.cpu_percent, agents.cpu_percent),
+                    mem_used_percent=COALESCE(excluded.mem_used_percent, agents.mem_used_percent),
+                    disk_used_percent=COALESCE(excluded.disk_used_percent, agents.disk_used_percent),
+                    net_rx_bps=COALESCE(excluded.net_rx_bps, agents.net_rx_bps),
+                    net_tx_bps=COALESCE(excluded.net_tx_bps, agents.net_tx_bps),
+                    disk_read_bps=COALESCE(excluded.disk_read_bps, agents.disk_read_bps),
+                    disk_write_bps=COALESCE(excluded.disk_write_bps, agents.disk_write_bps),
+                    load1=COALESCE(excluded.load1, agents.load1),
+                    host_mem_used=COALESCE(excluded.host_mem_used, agents.host_mem_used),
+                    host_mem_total=COALESCE(excluded.host_mem_total, agents.host_mem_total),
+                    metrics_summary=COALESCE(excluded.metrics_summary, agents.metrics_summary);
                 """;
             cmd.Parameters.AddWithValue("$id", agentId);
             cmd.Parameters.AddWithValue("$cn", computerName);
@@ -269,6 +372,20 @@ public sealed class SqliteCentralStore : ICentralStore
             cmd.Parameters.AddWithValue("$curl", (object?)centralUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$plat", (object?)platform ?? "windows");
             cmd.Parameters.AddWithValue("$err", (object?)lastError ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$sha", (object?)binarySha256 ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$sig", isSigned.HasValue ? (isSigned.Value ? 1 : 0) : DBNull.Value);
+            cmd.Parameters.AddWithValue("$pv", policyVersion.HasValue ? policyVersion.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$cpu", cpu.HasValue ? cpu.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$mem", memPct.HasValue ? memPct.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$disk", diskPct.HasValue ? diskPct.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$nrx", netRx.HasValue ? netRx.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$ntx", netTx.HasValue ? netTx.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$ior", ioR.HasValue ? ioR.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$iow", ioW.HasValue ? ioW.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$load", load1.HasValue ? load1.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$hmu", hostMemUsed.HasValue ? hostMemUsed.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$hmt", hostMemTotal.HasValue ? hostMemTotal.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$ms", (object?)metricsSummary ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
         }
         finally
@@ -532,36 +649,63 @@ public sealed class SqliteCentralStore : ICentralStore
         cmd.CommandText =
             """
             SELECT agent_id, computer_name, agent_version, os_version, last_seen_utc, status, queue_depth,
-                   host_ip, central_url, platform, last_error
+                   host_ip, central_url, platform, last_error, binary_sha256, is_binary_signed, policy_version,
+                   db_size_bytes, working_set_bytes, clock_skew_seconds,
+                   cpu_percent, mem_used_percent, disk_used_percent, net_rx_bps, net_tx_bps,
+                   disk_read_bps, disk_write_bps, load1, host_mem_used, host_mem_total, metrics_summary
             FROM agents ORDER BY last_seen_utc DESC;
             """;
         var list = new List<object>();
         var now = DateTimeOffset.UtcNow;
         await using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
-        {
-            var lastSeen = DateTimeOffset.Parse(reader.GetString(4));
-            var offlineSec = (int)Math.Max(0, (now - lastSeen).TotalSeconds);
-            var online = offlineSec <= 120;
-            list.Add(new AgentInventoryItem
-            {
-                AgentId = reader.GetString(0),
-                ComputerName = reader.GetString(1),
-                AgentVersion = reader.IsDBNull(2) ? null : reader.GetString(2),
-                OsVersion = reader.IsDBNull(3) ? null : reader.GetString(3),
-                LastSeenUtc = lastSeen,
-                Status = online ? (reader.IsDBNull(5) ? "Healthy" : reader.GetString(5)) : "Offline",
-                QueueDepth = reader.IsDBNull(6) ? 0 : reader.GetInt64(6),
-                HostIp = reader.FieldCount > 7 && !reader.IsDBNull(7) ? reader.GetString(7) : null,
-                CentralUrl = reader.FieldCount > 8 && !reader.IsDBNull(8) ? reader.GetString(8) : null,
-                Platform = reader.FieldCount > 9 && !reader.IsDBNull(9) ? reader.GetString(9) : "windows",
-                LastError = reader.FieldCount > 10 && !reader.IsDBNull(10) ? reader.GetString(10) : null,
-                Online = online,
-                OfflineSeconds = offlineSec
-            });
-        }
+            list.Add(ReadInventoryRow(reader, now));
 
         return list;
+    }
+
+    private static AgentInventoryItem ReadInventoryRow(SqliteDataReader reader, DateTimeOffset now)
+    {
+        var lastSeen = DateTimeOffset.Parse(reader.GetString(4));
+        var offlineSec = (int)Math.Max(0, (now - lastSeen).TotalSeconds);
+        var online = offlineSec <= 120;
+        double? Rd(int i) => reader.FieldCount > i && !reader.IsDBNull(i) ? reader.GetDouble(i) : null;
+        long? Rl(int i) => reader.FieldCount > i && !reader.IsDBNull(i) ? reader.GetInt64(i) : null;
+        string? Rs(int i) => reader.FieldCount > i && !reader.IsDBNull(i) ? reader.GetString(i) : null;
+
+        return new AgentInventoryItem
+        {
+            AgentId = reader.GetString(0),
+            ComputerName = reader.GetString(1),
+            AgentVersion = Rs(2),
+            OsVersion = Rs(3),
+            LastSeenUtc = lastSeen,
+            Status = online ? (Rs(5) ?? "Healthy") : "Offline",
+            QueueDepth = Rl(6) ?? 0,
+            HostIp = Rs(7),
+            CentralUrl = Rs(8),
+            Platform = Rs(9) ?? "windows",
+            LastError = Rs(10),
+            BinarySha256 = Rs(11),
+            IsBinarySigned = reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetInt64(12) != 0 : null,
+            PolicyVersion = reader.FieldCount > 13 && !reader.IsDBNull(13) ? (int)reader.GetInt64(13) : null,
+            DatabaseSizeBytes = Rl(14) ?? 0,
+            WorkingSetBytes = Rl(15) ?? 0,
+            ClockSkewSeconds = Rd(16) ?? 0,
+            CpuPercent = Rd(17),
+            MemUsedPercent = Rd(18),
+            DiskUsedPercent = Rd(19),
+            NetworkRxBytesPerSec = Rd(20),
+            NetworkTxBytesPerSec = Rd(21),
+            DiskReadBytesPerSec = Rd(22),
+            DiskWriteBytesPerSec = Rd(23),
+            LoadAverage1 = Rd(24),
+            HostMemUsedBytes = Rl(25),
+            HostMemTotalBytes = Rl(26),
+            MetricsSummary = Rs(27),
+            Online = online,
+            OfflineSeconds = offlineSec
+        };
     }
 
     public async Task SavePendingActionAsync(ResponseActionRequest request, string agentKey)
@@ -770,4 +914,316 @@ public sealed class SqliteCentralStore : ICentralStore
         };
         return i;
     }
+
+    public async Task AppendAuditAsync(string actor, string action, string? target, string result, string? detailJson, string? sourceIp)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            await using var conn = Open();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                INSERT INTO audit_log(timestamp_utc, actor, action, target, result, detail_json, source_ip)
+                VALUES ($ts, $actor, $action, $target, $result, $detail, $ip);
+                """;
+            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.Parameters.AddWithValue("$actor", actor);
+            cmd.Parameters.AddWithValue("$action", action);
+            cmd.Parameters.AddWithValue("$target", (object?)target ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$result", result);
+            cmd.Parameters.AddWithValue("$detail", (object?)detailJson ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$ip", (object?)sourceIp ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<AuditLogEntry>> ListAuditAsync(int take)
+    {
+        await using var conn = Open();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            SELECT id, timestamp_utc, actor, action, target, result, detail_json, source_ip
+            FROM audit_log ORDER BY id DESC LIMIT $n;
+            """;
+        cmd.Parameters.AddWithValue("$n", Math.Clamp(take, 1, 1000));
+        var list = new List<AuditLogEntry>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            list.Add(new AuditLogEntry
+            {
+                Id = reader.GetInt64(0),
+                TimestampUtc = DateTimeOffset.Parse(reader.GetString(1)),
+                Actor = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                Action = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                Target = reader.IsDBNull(4) ? null : reader.GetString(4),
+                Result = reader.IsDBNull(5) ? "" : reader.GetString(5),
+                DetailJson = reader.IsDBNull(6) ? null : reader.GetString(6),
+                SourceIp = reader.IsDBNull(7) ? null : reader.GetString(7)
+            });
+        }
+
+        return list;
+    }
+
+    public async Task<AgentPolicy> GetActivePolicyAsync(string? agentId = null)
+    {
+        await using var conn = Open();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT json FROM agent_policies WHERE policy_id='default' LIMIT 1;";
+        var o = await cmd.ExecuteScalarAsync();
+        if (o is string json)
+        {
+            var p = JsonSerializer.Deserialize<AgentPolicy>(json, JsonOptions);
+            if (p is not null) return p;
+        }
+
+        return new AgentPolicy { PolicyId = "default", PolicyVersion = 1, Mode = "Ids", DetectOnly = true };
+    }
+
+    public async Task UpsertPolicyAsync(AgentPolicy policy)
+    {
+        if (string.IsNullOrWhiteSpace(policy.PolicyId))
+            policy.PolicyId = "default";
+        if (policy.PolicyVersion < 1)
+            policy.PolicyVersion = 1;
+
+        await _gate.WaitAsync();
+        try
+        {
+            await using var conn = Open();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                INSERT INTO agent_policies(policy_id, version, json, updated_utc)
+                VALUES ($id, $v, $j, $t)
+                ON CONFLICT(policy_id) DO UPDATE SET version=excluded.version, json=excluded.json, updated_utc=excluded.updated_utc;
+                """;
+            cmd.Parameters.AddWithValue("$id", policy.PolicyId);
+            cmd.Parameters.AddWithValue("$v", policy.PolicyVersion);
+            cmd.Parameters.AddWithValue("$j", JsonSerializer.Serialize(policy, JsonOptions));
+            cmd.Parameters.AddWithValue("$t", DateTimeOffset.UtcNow.ToString("O"));
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<string?> IssueAgentApiKeyAsync(string agentId, bool rotate)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            await using var conn = Open();
+            if (!rotate)
+            {
+                await using var check = conn.CreateCommand();
+                check.CommandText = "SELECT agent_api_key_hash FROM agents WHERE agent_id=$id LIMIT 1;";
+                check.Parameters.AddWithValue("$id", agentId);
+                var existing = await check.ExecuteScalarAsync();
+                if (existing is string h && !string.IsNullOrWhiteSpace(h))
+                    return null; // keep existing — caller may already have key
+            }
+
+            var plain = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+            var hash = CherrySentinel.Server.Security.SecretBootstrapper.HashApiKey(plain);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                UPDATE agents SET agent_api_key_hash=$h WHERE agent_id=$id;
+                INSERT INTO agents(agent_id, computer_name, last_seen_utc, status, agent_api_key_hash)
+                SELECT $id, $id, $ts, 'Registered', $h
+                WHERE NOT EXISTS (SELECT 1 FROM agents WHERE agent_id=$id);
+                """;
+            // SQLite: two statements — first update, then insert if missing
+            cmd.CommandText = "UPDATE agents SET agent_api_key_hash=$h WHERE agent_id=$id;";
+            cmd.Parameters.AddWithValue("$h", hash);
+            cmd.Parameters.AddWithValue("$id", agentId);
+            var n = await cmd.ExecuteNonQueryAsync();
+            if (n == 0)
+            {
+                await using var ins = conn.CreateCommand();
+                ins.CommandText =
+                    "INSERT INTO agents(agent_id, computer_name, last_seen_utc, status, agent_api_key_hash) VALUES ($id, $cn, $ts, 'Registered', $h);";
+                ins.Parameters.AddWithValue("$id", agentId);
+                ins.Parameters.AddWithValue("$cn", agentId);
+                ins.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToString("O"));
+                ins.Parameters.AddWithValue("$h", hash);
+                await ins.ExecuteNonQueryAsync();
+            }
+
+            return plain;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task SetAgentApiKeyHashAsync(string agentId, string keyHash)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            await using var conn = Open();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE agents SET agent_api_key_hash=$h WHERE agent_id=$id;";
+            cmd.Parameters.AddWithValue("$h", keyHash);
+            cmd.Parameters.AddWithValue("$id", agentId);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<string?> FindAgentIdByApiKeyHashAsync(string keyHash)
+    {
+        if (string.IsNullOrWhiteSpace(keyHash)) return null;
+        await using var conn = Open();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT agent_id FROM agents WHERE agent_api_key_hash=$h LIMIT 1;";
+        cmd.Parameters.AddWithValue("$h", keyHash);
+        var o = await cmd.ExecuteScalarAsync();
+        return o as string;
+    }
+
+    public async Task UpdateAgentIntegrityAsync(string agentId, string? binarySha256, bool? isSigned, int? policyVersion)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            await using var conn = Open();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                UPDATE agents SET
+                    binary_sha256=COALESCE($sha, binary_sha256),
+                    is_binary_signed=COALESCE($sig, is_binary_signed),
+                    policy_version=COALESCE($pv, policy_version)
+                WHERE agent_id=$id;
+                """;
+            cmd.Parameters.AddWithValue("$id", agentId);
+            cmd.Parameters.AddWithValue("$sha", (object?)binarySha256 ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$sig", isSigned.HasValue ? (isSigned.Value ? 1 : 0) : DBNull.Value);
+            cmd.Parameters.AddWithValue("$pv", policyVersion.HasValue ? policyVersion.Value : DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task SaveAgentMetricsAsync(AgentHeartbeat hb)
+    {
+        if (string.IsNullOrWhiteSpace(hb.AgentId)) return;
+        await _gate.WaitAsync();
+        try
+        {
+            await using var conn = Open();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                INSERT INTO agent_metrics(agent_id, timestamp_utc, cpu, mem_pct, disk_pct, net_rx, net_tx, io_r, io_w, load1, queue_depth, working_set, status)
+                VALUES ($id, $ts, $cpu, $mem, $disk, $nrx, $ntx, $ior, $iow, $load, $q, $ws, $st);
+                """;
+            cmd.Parameters.AddWithValue("$id", hb.AgentId);
+            cmd.Parameters.AddWithValue("$ts", (hb.TimestampUtc == default ? DateTimeOffset.UtcNow : hb.TimestampUtc).ToString("O"));
+            cmd.Parameters.AddWithValue("$cpu", hb.CpuPercentEstimate.HasValue ? hb.CpuPercentEstimate.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$mem", hb.MemUsedPercent.HasValue ? hb.MemUsedPercent.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$disk", hb.DiskUsedPercent.HasValue ? hb.DiskUsedPercent.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$nrx", hb.NetworkRxBytesPerSec.HasValue ? hb.NetworkRxBytesPerSec.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$ntx", hb.NetworkTxBytesPerSec.HasValue ? hb.NetworkTxBytesPerSec.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$ior", hb.DiskReadBytesPerSec.HasValue ? hb.DiskReadBytesPerSec.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$iow", hb.DiskWriteBytesPerSec.HasValue ? hb.DiskWriteBytesPerSec.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$load", hb.LoadAverage1.HasValue ? hb.LoadAverage1.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("$q", hb.LocalQueueDepth);
+            cmd.Parameters.AddWithValue("$ws", hb.WorkingSetBytes);
+            cmd.Parameters.AddWithValue("$st", (object?)hb.Status ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+
+            // Prune: keep last ~500 samples per agent
+            await using var prune = conn.CreateCommand();
+            prune.CommandText =
+                """
+                DELETE FROM agent_metrics WHERE agent_id=$id AND id NOT IN (
+                  SELECT id FROM agent_metrics WHERE agent_id=$id ORDER BY id DESC LIMIT 500
+                );
+                """;
+            prune.Parameters.AddWithValue("$id", hb.AgentId);
+            await prune.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<AgentMetricsSample>> ListAgentMetricsAsync(string agentId, int take = 60)
+    {
+        await using var conn = Open();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            SELECT timestamp_utc, cpu, mem_pct, disk_pct, net_rx, net_tx, io_r, io_w, load1, queue_depth, working_set, status
+            FROM agent_metrics WHERE agent_id=$id ORDER BY id DESC LIMIT $n;
+            """;
+        cmd.Parameters.AddWithValue("$id", agentId);
+        cmd.Parameters.AddWithValue("$n", Math.Clamp(take, 1, 500));
+        var list = new List<AgentMetricsSample>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            list.Add(new AgentMetricsSample
+            {
+                TimestampUtc = DateTimeOffset.Parse(reader.GetString(0)),
+                CpuPercent = reader.IsDBNull(1) ? null : reader.GetDouble(1),
+                MemUsedPercent = reader.IsDBNull(2) ? null : reader.GetDouble(2),
+                DiskUsedPercent = reader.IsDBNull(3) ? null : reader.GetDouble(3),
+                NetworkRxBytesPerSec = reader.IsDBNull(4) ? null : reader.GetDouble(4),
+                NetworkTxBytesPerSec = reader.IsDBNull(5) ? null : reader.GetDouble(5),
+                DiskReadBytesPerSec = reader.IsDBNull(6) ? null : reader.GetDouble(6),
+                DiskWriteBytesPerSec = reader.IsDBNull(7) ? null : reader.GetDouble(7),
+                LoadAverage1 = reader.IsDBNull(8) ? null : reader.GetDouble(8),
+                QueueDepth = reader.IsDBNull(9) ? 0 : reader.GetInt64(9),
+                WorkingSetBytes = reader.IsDBNull(10) ? 0 : reader.GetInt64(10),
+                Status = reader.IsDBNull(11) ? null : reader.GetString(11)
+            });
+        }
+
+        return list;
+    }
+
+    public async Task<AgentInventoryItem?> GetAgentAsync(string agentId, int metricsTake = 60)
+    {
+        await using var conn = Open();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            SELECT agent_id, computer_name, agent_version, os_version, last_seen_utc, status, queue_depth,
+                   host_ip, central_url, platform, last_error, binary_sha256, is_binary_signed, policy_version,
+                   db_size_bytes, working_set_bytes, clock_skew_seconds,
+                   cpu_percent, mem_used_percent, disk_used_percent, net_rx_bps, net_tx_bps,
+                   disk_read_bps, disk_write_bps, load1, host_mem_used, host_mem_total, metrics_summary
+            FROM agents WHERE agent_id=$id LIMIT 1;
+            """;
+        cmd.Parameters.AddWithValue("$id", agentId);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync()) return null;
+        var item = ReadInventoryRow(reader, DateTimeOffset.UtcNow);
+        await reader.DisposeAsync();
+        item.MetricsHistory = (await ListAgentMetricsAsync(agentId, metricsTake)).ToList();
+        return item;
+    }
 }
+

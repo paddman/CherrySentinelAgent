@@ -14,14 +14,14 @@ Default posture: **IDS / detect-only** (optional IPS auto-block).
 
 ## Download installers (GitHub Releases)
 
-**Latest:** [**v1.0.11**](https://github.com/paddman/CherrySentinelAgent/releases/tag/v1.0.11) · [All releases](https://github.com/paddman/CherrySentinelAgent/releases)
+**Latest:** [**v1.0.13**](https://github.com/paddman/CherrySentinelAgent/releases/tag/v1.0.13) · [All releases](https://github.com/paddman/CherrySentinelAgent/releases)
 
 | File | Platform | Description | Size |
 |------|----------|-------------|------|
-| [**CherrySentinel-Setup-1.0.11.exe**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.11/CherrySentinel-Setup-1.0.11.exe) | Windows | Full stack: Central + Agent + Dashboard | ~133 MB |
-| [**CherrySentinel-Agent-Setup-1.0.14.exe**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.11/CherrySentinel-Agent-Setup-1.0.14.exe) | Windows | Agent only + tray (Edit Central IP/Port) | ~58 MB |
-| [**CherrySentinel-Central-Setup-1.0.4.exe**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.11/CherrySentinel-Central-Setup-1.0.4.exe) | Windows | Central server only | ~13 MB |
-| [**CherrySentinel-Linux-Agent-1.0.11-linux-x64.tar.gz**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.11/CherrySentinel-Linux-Agent-1.0.11-linux-x64.tar.gz) | Linux x64 | Agent client + `install-agent.sh` (systemd) | ~31 MB |
+| [**CherrySentinel-Setup-1.0.13.exe**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.13/CherrySentinel-Setup-1.0.13.exe) | Windows | Full stack: Central + Agent + Dashboard (auth, metrics fleet UI) | ~133 MB |
+| [**CherrySentinel-Agent-Setup-1.0.15.exe**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.13/CherrySentinel-Agent-Setup-1.0.15.exe) | Windows | Agent only + tray (Edit Central IP/Port) | ~58 MB |
+| [**CherrySentinel-Central-Setup-1.0.5.exe**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.13/CherrySentinel-Central-Setup-1.0.5.exe) | Windows | Central server only | ~36 MB |
+| [**CherrySentinel-Linux-Agent-1.0.13-linux-x64.tar.gz**](https://github.com/paddman/CherrySentinelAgent/releases/download/v1.0.13/CherrySentinel-Linux-Agent-1.0.13-linux-x64.tar.gz) | Linux x64 | Metrics + logs + auth + remediation + `install-agent.sh` | ~31 MB |
 
 ```mermaid
 %%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#0F68FF','primaryTextColor':'#fff','primaryBorderColor':'#071C3D','lineColor':'#0F68FF','secondaryColor':'#E8F0FE','tertiaryColor':'#F7F9FD'}}}%%
@@ -45,7 +45,7 @@ flowchart TB
   A --> Win
   L --> Lin
   Win -->|heartbeat + ingest| Srv
-  Lin -->|heartbeat| Srv
+  Lin -->|heartbeat + ingest + metrics| Srv
   Ops -->|HTTPS API| Srv
 ```
 
@@ -59,10 +59,12 @@ flowchart TB
 | **Silent Windows agent** | `CherrySentinel-Agent-Setup-1.0.14.exe /VERYSILENT /ServerHost=10.0.0.5 /Port=7443` |
 
 ```bash
-# Linux
-tar -xzf CherrySentinel-Linux-Agent-1.0.11-linux-x64.tar.gz
-cd CherrySentinel-Linux-Agent-1.0.11-linux-x64
+# Linux (metrics + nginx/PHP/Docker/Node logs + allowlisted remediation)
+tar -xzf CherrySentinel-Linux-Agent-1.0.12-linux-x64.tar.gz
+cd CherrySentinel-Linux-Agent-1.0.12-linux-x64
 sudo ./install-agent.sh --host <CENTRAL_IP> --port 7443
+# status: cat /var/lib/cherrysentinel/status.json
+# docs: docs/linux-agent.md
 ```
 
 ---
@@ -530,7 +532,7 @@ CherrySentinel.sln
 |-------|------------|
 | Language | C# / **.NET 10** |
 | Windows Agent | `net10.0-windows`, **win-x64 self-contained** service |
-| Linux Agent | `net10.0`, **linux-x64 self-contained**, systemd |
+| Linux Agent | `net10.0`, **linux-x64 self-contained**, systemd — CPU/RAM/disk/net/I/O, multi-stack logs, remediation |
 | Local DB | SQLite WAL + offline queue |
 | Central DB | **SQLite default** · PostgreSQL optional |
 | UI | WPF Dashboard + WinForms tray |
@@ -553,9 +555,9 @@ dotnet test CherrySentinel.sln -c Release
 .\installer\build-setup-agent.ps1 -Version 1.0.14    # Agent
 .\installer\build-setup-central.ps1                  # Central
 
-# Linux package
-.\installer\build-agent-linux.ps1 -Version 1.0.11
-# → artifacts\setup\CherrySentinel-Linux-Agent-*-linux-x64.tar.gz
+# Linux package (full metrics + logs + response)
+.\installer\build-agent-linux.ps1 -Version 1.0.12
+# → artifacts\setup\CherrySentinel-Linux-Agent-1.0.12-linux-x64.tar.gz
 ```
 
 ### Publish agent only
@@ -595,7 +597,7 @@ timeline
   section Phase 0
     Durable actions + fleet inventory + versions + Linux client : done
   section Phase 1
-    Enrollment token + API auth + policy pull : next
+    Enrollment token + API auth + policy + audit : done (v1.0.13)
   section Phase 2
     Timeline + process tree + isolate + evidence : next
   section Phase 3

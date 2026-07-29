@@ -11,10 +11,12 @@ See session plan for full strategy. Summary:
 - Tray: Test Central connection
 - Linux agent skeleton (heartbeat only)
 
-## Phase 1
-- Enrollment token + API keys
-- Policy pull on heartbeat
-- Audit log
+## Phase 1 (P0 org trust — implemented v1.0.13)
+- Enrollment token + agent/operator API keys (`X-Cherry-Api-Key`)
+- Policy pull on heartbeat + `GET/PUT /api/v1/policy`
+- Durable `audit_log` + `GET /api/v1/audit`
+- Agent binary SHA-256 / signed report on heartbeat
+- Docs: `docs/security-auth-policy.md`
 
 ## Phase 2
 - Host timeline, process tree, hunt

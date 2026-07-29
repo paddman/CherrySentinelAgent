@@ -20,6 +20,7 @@ public class ResponseAndQueueTests
         var resp = Options.Create(new ResponseOptions { DetectOnly = true, LogOnlyMode = true });
         var executor = new LocalResponseExecutor(
             resp, agent,
+            new RuntimePolicyState(),
             new FirewallBlocker(NullLogger<FirewallBlocker>.Instance),
             NullLogger<LocalResponseExecutor>.Instance);
 
@@ -44,6 +45,7 @@ public class ResponseAndQueueTests
         var resp = Options.Create(new ResponseOptions { DetectOnly = false, LogOnlyMode = false });
         var executor = new LocalResponseExecutor(
             resp, agent,
+            new RuntimePolicyState(),
             new FirewallBlocker(NullLogger<FirewallBlocker>.Instance),
             NullLogger<LocalResponseExecutor>.Instance);
 

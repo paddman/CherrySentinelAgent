@@ -681,6 +681,22 @@ public sealed class PostgresStore : ICentralStore
                     payload TEXT NOT NULL,
                     last_seen_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id BIGSERIAL PRIMARY KEY,
+                    timestamp_utc TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    actor TEXT,
+                    action TEXT,
+                    target TEXT,
+                    result TEXT,
+                    detail_json TEXT,
+                    source_ip TEXT
+                );
+                CREATE TABLE IF NOT EXISTS agent_policies (
+                    policy_id TEXT PRIMARY KEY,
+                    version INTEGER NOT NULL,
+                    json TEXT NOT NULL,
+                    updated_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
                 """;
             await cmd.ExecuteNonQueryAsync();
         }
@@ -689,4 +705,115 @@ public sealed class PostgresStore : ICentralStore
             // DB may be offline; callers will surface errors
         }
     }
+
+    // P0 auth/policy/audit — best-effort Postgres parity
+    public async Task AppendAuditAsync(string actor, string action, string? target, string result, string? detailJson, string? sourceIp)
+    {
+        try
+        {
+            await EnsurePendingTablesAsync();
+            await using var conn = new NpgsqlConnection(_cs);
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                INSERT INTO audit_log(timestamp_utc, actor, action, target, result, detail_json, source_ip)
+                VALUES (NOW(), @actor, @action, @target, @result, @detail, @ip);
+                """;
+            cmd.Parameters.AddWithValue("actor", actor);
+            cmd.Parameters.AddWithValue("action", action);
+            cmd.Parameters.AddWithValue("target", (object?)target ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("result", result);
+            cmd.Parameters.AddWithValue("detail", (object?)detailJson ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("ip", (object?)sourceIp ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "AppendAudit failed");
+        }
+    }
+
+    public async Task<IReadOnlyList<AuditLogEntry>> ListAuditAsync(int take)
+    {
+        try
+        {
+            await EnsurePendingTablesAsync();
+            await using var conn = new NpgsqlConnection(_cs);
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                SELECT id, timestamp_utc, actor, action, target, result, detail_json, source_ip
+                FROM audit_log ORDER BY id DESC LIMIT @n;
+                """;
+            cmd.Parameters.AddWithValue("n", Math.Clamp(take, 1, 1000));
+            var list = new List<AuditLogEntry>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                list.Add(new AuditLogEntry
+                {
+                    Id = reader.GetInt64(0),
+                    TimestampUtc = reader.GetFieldValue<DateTimeOffset>(1),
+                    Actor = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                    Action = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                    Target = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    Result = reader.IsDBNull(5) ? "" : reader.GetString(5),
+                    DetailJson = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    SourceIp = reader.IsDBNull(7) ? null : reader.GetString(7)
+                });
+            }
+
+            return list;
+        }
+        catch
+        {
+            return Array.Empty<AuditLogEntry>();
+        }
+    }
+
+    public Task<AgentPolicy> GetActivePolicyAsync(string? agentId = null) =>
+        Task.FromResult(new AgentPolicy { PolicyId = "default", PolicyVersion = 1, Mode = "Ids", DetectOnly = true });
+
+    public async Task UpsertPolicyAsync(AgentPolicy policy)
+    {
+        await EnsurePendingTablesAsync();
+        await using var conn = new NpgsqlConnection(_cs);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            INSERT INTO agent_policies(policy_id, version, json, updated_utc)
+            VALUES (@id, @v, @j, NOW())
+            ON CONFLICT (policy_id) DO UPDATE SET version=EXCLUDED.version, json=EXCLUDED.json, updated_utc=NOW();
+            """;
+        cmd.Parameters.AddWithValue("id", policy.PolicyId);
+        cmd.Parameters.AddWithValue("v", policy.PolicyVersion);
+        cmd.Parameters.AddWithValue("j", System.Text.Json.JsonSerializer.Serialize(policy));
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public Task<string?> IssueAgentApiKeyAsync(string agentId, bool rotate) =>
+        Task.FromResult<string?>(Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)).ToLowerInvariant());
+
+    public Task SetAgentApiKeyHashAsync(string agentId, string keyHash) => Task.CompletedTask;
+
+    public Task<string?> FindAgentIdByApiKeyHashAsync(string keyHash) => Task.FromResult<string?>(null);
+
+    public Task UpdateAgentIntegrityAsync(string agentId, string? binarySha256, bool? isSigned, int? policyVersion) =>
+        Task.CompletedTask;
+
+    public Task SaveAgentMetricsAsync(AgentHeartbeat hb) => Task.CompletedTask;
+
+    public Task<IReadOnlyList<AgentMetricsSample>> ListAgentMetricsAsync(string agentId, int take = 60) =>
+        Task.FromResult<IReadOnlyList<AgentMetricsSample>>(Array.Empty<AgentMetricsSample>());
+
+    public async Task<AgentInventoryItem?> GetAgentAsync(string agentId, int metricsTake = 60)
+    {
+        var all = await ListAgentsAsync();
+        return all.OfType<AgentInventoryItem>().FirstOrDefault(a =>
+            string.Equals(a.AgentId, agentId, StringComparison.OrdinalIgnoreCase));
+    }
 }
+

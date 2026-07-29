@@ -1,5 +1,8 @@
 # Known Limitations
 
+0. **API auth default off**  
+   `Security:RequireAuth` defaults to **false** for lab upgrade safety. Enable after distributing `EnrollmentToken` / `OperatorApiKey` from `secrets.json`. See `docs/security-auth-policy.md`.
+
 1. **.NET 10 on Windows Server 2012/2012 R2**  
    Collector code uses 2012-era Win32 APIs, but the .NET 10 runtime support matrix may not list 6.2/6.3. Always validate on golden images with self-contained publish + VC++ Redistributable.
 

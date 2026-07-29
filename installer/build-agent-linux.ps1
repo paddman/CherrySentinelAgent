@@ -5,14 +5,14 @@
 
 .EXAMPLE
   .\installer\build-agent-linux.ps1
-  .\installer\build-agent-linux.ps1 -Version 1.0.11
+  .\installer\build-agent-linux.ps1 -Version 1.0.12
   .\installer\build-agent-linux.ps1 -SkipPublish
 #>
 [CmdletBinding()]
 param(
     [switch]$SkipPublish,
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.11",
+    [string]$Version = "1.0.12",
     [string]$Runtime = "linux-x64"
 )
 

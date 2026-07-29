@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using CherrySentinel.Shared.Contracts;
 using CherrySentinel.Shared.Models;
 
 namespace CherrySentinel.Dashboard.Services;
@@ -14,10 +15,12 @@ public sealed class CentralApiClient : IDisposable
     };
 
     public string BaseUrl { get; private set; }
+    public string? ApiKey { get; private set; }
 
-    public CentralApiClient(string baseUrl)
+    public CentralApiClient(string baseUrl, string? apiKey = null)
     {
         BaseUrl = baseUrl.TrimEnd('/');
+        ApiKey = apiKey;
         var handler = new HttpClientHandler
         {
             ServerCertificateCustomValidationCallback =
@@ -29,12 +32,22 @@ public sealed class CentralApiClient : IDisposable
             Timeout = TimeSpan.FromSeconds(15)
         };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("CherrySentinel-Dashboard/1.0");
+        SetApiKey(apiKey);
     }
 
     public void SetBaseUrl(string baseUrl)
     {
         BaseUrl = baseUrl.TrimEnd('/');
         _http.BaseAddress = new Uri(BaseUrl + "/");
+    }
+
+    /// <summary>Operator API key (X-Cherry-Api-Key) — required when Central Security:RequireAuth=true.</summary>
+    public void SetApiKey(string? apiKey)
+    {
+        ApiKey = apiKey;
+        _http.DefaultRequestHeaders.Remove("X-Cherry-Api-Key");
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Cherry-Api-Key", apiKey.Trim());
     }
 
     public async Task<bool> HealthAsync(CancellationToken ct = default)
@@ -135,6 +148,33 @@ public sealed class CentralApiClient : IDisposable
         {
             var list = await _http.GetFromJsonAsync<List<JsonElement>>("api/v1/agents", JsonOptions, ct);
             return list?.Cast<object>().ToList() ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public async Task<AgentInventoryItem?> GetAgentDetailAsync(string agentId, int metricsTake = 60, CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<AgentInventoryItem>(
+                $"api/v1/agents/{Uri.EscapeDataString(agentId)}?metrics={metricsTake}", JsonOptions, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task<List<AgentMetricsSample>> GetAgentMetricsAsync(string agentId, int take = 60, CancellationToken ct = default)
+    {
+        try
+        {
+            var list = await _http.GetFromJsonAsync<List<AgentMetricsSample>>(
+                $"api/v1/agents/{Uri.EscapeDataString(agentId)}/metrics?take={take}", JsonOptions, ct);
+            return list ?? [];
         }
         catch
         {

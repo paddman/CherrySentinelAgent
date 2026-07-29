@@ -47,6 +47,12 @@ public sealed class CentralServerOptions
     public int BatchSize { get; set; } = 200;
     public int OfflineQueueLimit { get; set; } = 100_000;
 
+    /// <summary>Central enrollment token (register once). From Central secrets.json EnrollmentToken.</summary>
+    public string EnrollmentToken { get; set; } = "";
+
+    /// <summary>Per-agent API key issued on register. Sent as X-Cherry-Api-Key.</summary>
+    public string ApiKey { get; set; } = "";
+
     /// <summary>Optional syslog forward of alerts to Central (or any syslog receiver).</summary>
     public bool SyslogEnabled { get; set; }
     public string SyslogHost { get; set; } = "127.0.0.1";

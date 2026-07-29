@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using CherrySentinel.Server.Correlation;
 using CherrySentinel.Server.Data;
+using CherrySentinel.Server.Security;
 using CherrySentinel.Server.Services;
 using CherrySentinel.Server.Signatures;
 using CherrySentinel.Server.Syslog;
@@ -39,6 +40,12 @@ builder.Services.Configure<PostgresOptions>(builder.Configuration.GetSection(Pos
 builder.Services.Configure<SqliteCentralOptions>(builder.Configuration.GetSection(SqliteCentralOptions.SectionName));
 builder.Services.Configure<CorrelationOptions>(builder.Configuration.GetSection(CorrelationOptions.SectionName));
 builder.Services.Configure<SyslogOptions>(builder.Configuration.GetSection(SyslogOptions.SectionName));
+builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
+// Bootstrap secrets into options before DI freezes them
+builder.Services.PostConfigure<SecurityOptions>(opts =>
+{
+    SecretBootstrapper.Apply(builder.Configuration, opts);
+});
 builder.Services.AddSingleton<OpenSourceSignatureEngine>();
 builder.Services.AddHostedService<SyslogListenerService>();
 
@@ -108,9 +115,13 @@ if (enableMtlsAuth)
 }
 
 var app = builder.Build();
+// Force secret bootstrap early (PostConfigure runs on first resolve)
+_ = app.Services.GetRequiredService<IOptions<SecurityOptions>>().Value;
+
 // Must run before model binding so gzip/br request bodies become readable JSON
 app.UseRequestDecompression();
 app.UseResponseCompression();
+app.UseMiddleware<ApiKeyAuthMiddleware>();
 app.Use(async (ctx, next) =>
 {
     // Structured audit for mutating calls
@@ -152,6 +163,13 @@ if (enableMtlsAuth)
     app.UseAuthorization();
 }
 
+var securityOpts = app.Services.GetRequiredService<IOptions<SecurityOptions>>().Value;
+Log.Information(
+    "Security RequireAuth={Require} EnrollmentTokenConfigured={Enroll} OperatorKeyConfigured={Op}",
+    securityOpts.RequireAuth,
+    !string.IsNullOrWhiteSpace(securityOpts.EnrollmentToken),
+    !string.IsNullOrWhiteSpace(securityOpts.OperatorApiKey));
+
 var centralVersion = CherrySentinel.Shared.ProductInfo.GetVersion();
 
 app.MapGet("/health", () => Results.Ok(new
@@ -190,29 +208,100 @@ app.MapGet("/api/v1/signatures", (OpenSourceSignatureEngine sigs) =>
         s.Enabled
     })));
 
-app.MapPost("/api/v1/agents/register", async (AgentRegistrationRequest req, ICentralStore store) =>
+app.MapPost("/api/v1/agents/register", async (AgentRegistrationRequest req, ICentralStore store, IOptions<SecurityOptions> sec, HttpContext http) =>
 {
+    var s = sec.Value;
+    var tokenConfigured = !string.IsNullOrWhiteSpace(s.EnrollmentToken);
+    if (s.RequireAuth || tokenConfigured)
+    {
+        if (string.IsNullOrWhiteSpace(req.EnrollmentToken) ||
+            !FixedTimeEquals(req.EnrollmentToken, s.EnrollmentToken))
+        {
+            await store.AppendAuditAsync("anonymous", "agent.register", req.AgentId, "fail",
+                """{"reason":"bad_enrollment_token"}""", http.Connection.RemoteIpAddress?.ToString());
+            return Results.Json(new { error = "invalid_enrollment_token" }, statusCode: StatusCodes.Status403Forbidden);
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(req.AgentId))
+        return Results.BadRequest(new { error = "agent_id_required" });
+
     await store.RegisterAgentAsync(req);
+    await store.UpdateAgentIntegrityAsync(req.AgentId, req.BinarySha256, req.IsBinarySigned, null);
+
+    // Issue new key when rotate requested or first enroll; re-register with RotateApiKey=false keeps existing (returns null).
+    var issued = await store.IssueAgentApiKeyAsync(req.AgentId, rotate: req.RotateApiKey);
+    if (issued is null && req.RotateApiKey)
+        issued = await store.IssueAgentApiKeyAsync(req.AgentId, rotate: true);
+    // First-time enroll always needs a key
+    if (issued is null)
+        issued = await store.IssueAgentApiKeyAsync(req.AgentId, rotate: true);
+
+    var policy = await store.GetActivePolicyAsync(req.AgentId);
+    await store.AppendAuditAsync($"agent:{req.AgentId}", "agent.register", req.AgentId, "success",
+        JsonSerializer.Serialize(new { req.ComputerName, req.Platform, req.AgentVersion }),
+        http.Connection.RemoteIpAddress?.ToString());
+
     return Results.Ok(new AgentRegistrationResponse
     {
         Accepted = true,
         Message = "registered",
-        ServerUtc = DateTimeOffset.UtcNow
+        ServerUtc = DateTimeOffset.UtcNow,
+        AgentApiKey = issued,
+        Policy = policy
     });
 });
 
-app.MapPost("/api/v1/agents/heartbeat", async (AgentHeartbeat hb, ICentralStore store, ActionService actions) =>
+app.MapPost("/api/v1/agents/heartbeat", async (AgentHeartbeat hb, ICentralStore store, ActionService actions, IOptions<SecurityOptions> sec, HttpContext http) =>
 {
+    var s = sec.Value;
+    // When RequireAuth, middleware already validated agent key — enforce agentId match if bound
+    if (http.Items.TryGetValue(ApiKeyAuthMiddleware.AgentIdItem, out var bound) &&
+        bound is string boundId &&
+        !string.IsNullOrEmpty(boundId) &&
+        !string.Equals(boundId, hb.AgentId, StringComparison.OrdinalIgnoreCase))
+    {
+        await store.AppendAuditAsync($"agent:{boundId}", "agent.heartbeat", hb.AgentId, "fail",
+            """{"reason":"agent_id_mismatch"}""", http.Connection.RemoteIpAddress?.ToString());
+        return Results.Json(new { error = "agent_id_mismatch" }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    if (s.RequireSignedAgent && hb.IsBinarySigned == false)
+    {
+        return Results.Json(new { error = "unsigned_agent_rejected" }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    if (s.ApprovedAgentSha256 is { Count: > 0 } && !string.IsNullOrWhiteSpace(hb.BinarySha256))
+    {
+        var ok = s.ApprovedAgentSha256.Any(a =>
+            string.Equals(a.Trim(), hb.BinarySha256, StringComparison.OrdinalIgnoreCase));
+        if (!ok)
+            return Results.Json(new { error = "agent_hash_not_approved" }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
     await store.UpsertAgentAsync(hb);
     var serverUtc = DateTimeOffset.UtcNow;
     var skew = (hb.TimestampUtc - serverUtc).TotalSeconds;
     var pending = await actions.GetPendingForAgentAsync(hb.AgentId);
+
+    AgentPolicy? policyOut = null;
+    string? policyMsg = null;
+    var active = await store.GetActivePolicyAsync(hb.AgentId);
+    var applied = hb.AppliedPolicyVersion ?? 0;
+    if (active.PolicyVersion > applied)
+    {
+        policyOut = active;
+        policyMsg = $"Apply policy {active.PolicyId} v{active.PolicyVersion}";
+    }
+
     return Results.Ok(new HeartbeatResponse
     {
         Accepted = true,
         ServerUtc = serverUtc,
         ClockSkewSeconds = skew,
-        PendingActions = pending
+        PendingActions = pending,
+        Policy = policyOut,
+        PolicyMessage = policyMsg
     });
 });
 
@@ -293,10 +382,39 @@ app.MapGet("/api/v1/incidents/{id}", async (string id, ICentralStore store) =>
     return incident is null ? Results.NotFound() : Results.Ok(incident);
 });
 
-app.MapPost("/api/v1/actions", async (ResponseActionRequest request, ActionService actions) =>
+app.MapPost("/api/v1/actions", async (ResponseActionRequest request, ActionService actions, ICentralStore store, HttpContext http) =>
 {
+    var actor = http.Items.TryGetValue(ApiKeyAuthMiddleware.PrincipalItem, out var p) ? p?.ToString() ?? "anonymous" : "anonymous";
     var saved = await actions.EnqueueAsync(request);
+    await store.AppendAuditAsync(
+        actor == "operator" ? "operator" : actor,
+        "action.enqueue",
+        request.TargetAgentId ?? request.RequestId,
+        "success",
+        JsonSerializer.Serialize(new { request.ActionType, request.TargetIp, request.TargetPort, request.ServiceName, request.Approved }),
+        http.Connection.RemoteIpAddress?.ToString());
     return Results.Ok(saved);
+});
+
+app.MapGet("/api/v1/audit", async (ICentralStore store, int take = 100) =>
+    Results.Ok(await store.ListAuditAsync(Math.Clamp(take, 1, 500))));
+
+app.MapGet("/api/v1/policy", async (ICentralStore store) =>
+    Results.Ok(await store.GetActivePolicyAsync()));
+
+app.MapPut("/api/v1/policy", async (AgentPolicy policy, ICentralStore store, HttpContext http) =>
+{
+    if (policy.PolicyVersion < 1) policy.PolicyVersion = 1;
+    if (string.IsNullOrWhiteSpace(policy.PolicyId)) policy.PolicyId = "default";
+    // Bump version if client did not
+    var current = await store.GetActivePolicyAsync();
+    if (policy.PolicyVersion <= current.PolicyVersion)
+        policy.PolicyVersion = current.PolicyVersion + 1;
+    await store.UpsertPolicyAsync(policy);
+    await store.AppendAuditAsync("operator", "policy.update", policy.PolicyId, "success",
+        JsonSerializer.Serialize(new { policy.PolicyVersion, policy.Mode, policy.DetectOnly }),
+        http.Connection.RemoteIpAddress?.ToString());
+    return Results.Ok(policy);
 });
 
 app.MapGet("/api/v1/actions/{id}", async (string id, ActionService actions) =>
@@ -306,6 +424,15 @@ app.MapGet("/api/v1/actions/{id}", async (string id, ActionService actions) =>
 });
 
 app.MapGet("/api/v1/agents", async (ICentralStore store) => Results.Ok(await store.ListAgentsAsync()));
+
+app.MapGet("/api/v1/agents/{agentId}", async (string agentId, ICentralStore store, int metrics = 60) =>
+{
+    var item = await store.GetAgentAsync(agentId, Math.Clamp(metrics, 1, 500));
+    return item is null ? Results.NotFound() : Results.Ok(item);
+});
+
+app.MapGet("/api/v1/agents/{agentId}/metrics", async (string agentId, ICentralStore store, int take = 60) =>
+    Results.Ok(await store.ListAgentMetricsAsync(agentId, Math.Clamp(take, 1, 500))));
 
 // Threat catalog + multi-host lateral tracking (detect/track only)
 app.MapGet("/api/v1/threats/catalog", (LateralMovementTracker tracker) =>
@@ -345,6 +472,14 @@ app.MapGet("/api/v1/threats/by-host/{hostOrIp}", (string hostOrIp, LateralMoveme
 
 Log.Information("Cherry Sentinel Server starting");
 app.Run();
+
+static bool FixedTimeEquals(string a, string b)
+{
+    var ba = System.Text.Encoding.UTF8.GetBytes(a ?? "");
+    var bb = System.Text.Encoding.UTF8.GetBytes(b ?? "");
+    return ba.Length == bb.Length &&
+           System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(ba, bb);
+}
 
 /// <summary>
 /// Create or load a durable self-signed HTTPS cert for Windows Service / production lab use

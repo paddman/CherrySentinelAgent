@@ -29,4 +29,20 @@ public interface ICentralStore
     // Durable threat campaigns (JSON blob)
     Task UpsertCampaignJsonAsync(string campaignId, string json);
     Task<IReadOnlyList<(string Id, string Json)>> ListCampaignJsonAsync(int take);
+
+    // P0: auth + policy + audit
+    Task AppendAuditAsync(string actor, string action, string? target, string result, string? detailJson, string? sourceIp);
+    Task<IReadOnlyList<AuditLogEntry>> ListAuditAsync(int take);
+    Task<AgentPolicy> GetActivePolicyAsync(string? agentId = null);
+    Task UpsertPolicyAsync(AgentPolicy policy);
+    /// <summary>Issue or keep agent API key. Returns plaintext key when issued/rotated; null when unchanged and not re-issued.</summary>
+    Task<string?> IssueAgentApiKeyAsync(string agentId, bool rotate);
+    Task SetAgentApiKeyHashAsync(string agentId, string keyHash);
+    Task<string?> FindAgentIdByApiKeyHashAsync(string keyHash);
+    Task UpdateAgentIntegrityAsync(string agentId, string? binarySha256, bool? isSigned, int? policyVersion);
+
+    /// <summary>Append heartbeat metrics sample for history charts.</summary>
+    Task SaveAgentMetricsAsync(AgentHeartbeat hb);
+    Task<AgentInventoryItem?> GetAgentAsync(string agentId, int metricsTake = 60);
+    Task<IReadOnlyList<AgentMetricsSample>> ListAgentMetricsAsync(string agentId, int take = 60);
 }

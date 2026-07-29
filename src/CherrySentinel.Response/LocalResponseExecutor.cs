@@ -24,6 +24,7 @@ public sealed class LocalResponseExecutor : IResponseExecutor
 {
     private readonly ResponseOptions _options;
     private readonly AgentOptions _agentOptions;
+    private readonly RuntimePolicyState _runtimePolicy;
     private readonly FirewallBlocker _firewall;
     private readonly IEvidenceCollector? _evidence;
     private readonly ILogger<LocalResponseExecutor> _logger;
@@ -31,22 +32,31 @@ public sealed class LocalResponseExecutor : IResponseExecutor
     public LocalResponseExecutor(
         IOptions<ResponseOptions> options,
         IOptions<AgentOptions> agentOptions,
+        RuntimePolicyState runtimePolicy,
         FirewallBlocker firewall,
         ILogger<LocalResponseExecutor> logger,
         IEvidenceCollector? evidence = null)
     {
         _options = options.Value;
         _agentOptions = agentOptions.Value;
+        _runtimePolicy = runtimePolicy;
         _firewall = firewall;
         _logger = logger;
         _evidence = evidence;
     }
 
-    public bool IsIpsMode =>
-        string.Equals(_options.Mode, "Ips", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(_options.Mode, "IPS", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(_agentOptions.Mode, "Ips", StringComparison.OrdinalIgnoreCase) ||
-        (!_options.DetectOnly && !_agentOptions.DetectOnly && !_options.LogOnlyMode);
+    public bool IsIpsMode
+    {
+        get
+        {
+            var mode = _runtimePolicy.PolicyVersion > 0 ? _runtimePolicy.Mode : _options.Mode;
+            var detectOnly = _runtimePolicy.PolicyVersion > 0 ? _runtimePolicy.DetectOnly : (_options.DetectOnly || _agentOptions.DetectOnly);
+            return string.Equals(mode, "Ips", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(mode, "IPS", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(_agentOptions.Mode, "Ips", StringComparison.OrdinalIgnoreCase) ||
+                   (!detectOnly && !_options.LogOnlyMode);
+        }
+    }
 
     public bool IsIdsMode => !IsIpsMode;
 

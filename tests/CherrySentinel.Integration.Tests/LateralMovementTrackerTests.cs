@@ -1,8 +1,8 @@
-using CherrySentinel.Server.Correlation;
+﻿using CherrySentinel.Server.Correlation;
 using CherrySentinel.Server.Data;
+using CherrySentinel.Shared.Contracts;
 using CherrySentinel.Shared.Enums;
 using CherrySentinel.Shared.Models;
-// CorrelationOptions lives in Server.Data
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -14,12 +14,16 @@ namespace CherrySentinel.Integration.Tests;
 /// </summary>
 public class LateralMovementTrackerTests
 {
+    private static LateralMovementTracker CreateTracker() =>
+        new(
+            Options.Create(new CorrelationOptions { TimestampToleranceSeconds = 120 }),
+            NullLogger<LateralMovementTracker>.Instance,
+            new NullCentralStore());
+
     [Fact]
     public void Tracks_Threat_From_Source_To_Multiple_Hosts()
     {
-        var tracker = new LateralMovementTracker(
-            Options.Create(new CorrelationOptions { TimestampToleranceSeconds = 120 }),
-            NullLogger<LateralMovementTracker>.Instance);
+        var tracker = CreateTracker();
 
         var now = DateTimeOffset.UtcNow;
         var hop1 = new Incident
@@ -64,7 +68,6 @@ public class LateralMovementTrackerTests
         var campaigns = tracker.IngestIncidents([hop1, hop2]);
         Assert.NotEmpty(campaigns);
 
-        // After pivot link, expect multi-hop path 35 → 190 → 200
         var multi = tracker.ListCampaigns().FirstOrDefault(c => c.Hops.Count >= 2)
                     ?? campaigns.OrderByDescending(c => c.Hops.Count).First();
 
@@ -77,7 +80,6 @@ public class LateralMovementTrackerTests
         Assert.Contains("Threat Campaign", display);
         Assert.Contains("Lateral path", display);
 
-        // Catalog covers all major classes
         var catalog = tracker.GetThreatCatalog();
         Assert.Contains(catalog, e => e.DetectionRuleId == "INTERNAL_PASSWORD_SPRAY");
         Assert.Contains(catalog, e => e.Category == "lateral_movement");
@@ -87,9 +89,41 @@ public class LateralMovementTrackerTests
     [Fact]
     public void FindByHost_Returns_Empty_For_Unknown()
     {
-        var tracker = new LateralMovementTracker(
-            Options.Create(new CorrelationOptions()),
-            NullLogger<LateralMovementTracker>.Instance);
+        var tracker = CreateTracker();
         Assert.Empty(tracker.FindByHostOrIp("203.0.113.1"));
+    }
+
+    private sealed class NullCentralStore : ICentralStore
+    {
+        public Task InitializeAsync() => Task.CompletedTask;
+        public Task RegisterAgentAsync(AgentRegistrationRequest req) => Task.CompletedTask;
+        public Task UpsertAgentAsync(AgentHeartbeat hb) => Task.CompletedTask;
+        public Task<bool> HasIdempotencyKeyAsync(string key) => Task.FromResult(false);
+        public Task SaveIdempotencyKeyAsync(string key) => Task.CompletedTask;
+        public Task SaveBatchAsync(AgentIngestBatch batch) => Task.CompletedTask;
+        public Task UpsertIncidentAsync(Incident incident) => Task.CompletedTask;
+        public Task<IReadOnlyList<Incident>> ListIncidentsAsync(int take) => Task.FromResult<IReadOnlyList<Incident>>(Array.Empty<Incident>());
+        public Task<Incident?> GetIncidentAsync(string id) => Task.FromResult<Incident?>(null);
+        public Task<IReadOnlyList<object>> ListAgentsAsync() => Task.FromResult<IReadOnlyList<object>>(Array.Empty<object>());
+        public Task<IReadOnlyList<NetworkConnectionRecord>> FindOutboundAsync(string remoteIp, int? remotePort, DateTimeOffset from, DateTimeOffset to) =>
+            Task.FromResult<IReadOnlyList<NetworkConnectionRecord>>(Array.Empty<NetworkConnectionRecord>());
+        public Task SavePendingActionAsync(ResponseActionRequest request, string agentKey) => Task.CompletedTask;
+        public Task<List<ResponseActionRequest>> TakePendingActionsAsync(string agentId) => Task.FromResult(new List<ResponseActionRequest>());
+        public Task<ResponseActionRequest?> GetPendingActionAsync(string requestId) => Task.FromResult<ResponseActionRequest?>(null);
+        public Task UpsertCampaignJsonAsync(string campaignId, string json) => Task.CompletedTask;
+        public Task<IReadOnlyList<(string Id, string Json)>> ListCampaignJsonAsync(int take) =>
+            Task.FromResult<IReadOnlyList<(string, string)>>(Array.Empty<(string, string)>());
+        public Task AppendAuditAsync(string actor, string action, string? target, string result, string? detailJson, string? sourceIp) => Task.CompletedTask;
+        public Task<IReadOnlyList<AuditLogEntry>> ListAuditAsync(int take) => Task.FromResult<IReadOnlyList<AuditLogEntry>>(Array.Empty<AuditLogEntry>());
+        public Task<AgentPolicy> GetActivePolicyAsync(string? agentId = null) => Task.FromResult(new AgentPolicy());
+        public Task UpsertPolicyAsync(AgentPolicy policy) => Task.CompletedTask;
+        public Task<string?> IssueAgentApiKeyAsync(string agentId, bool rotate) => Task.FromResult<string?>(null);
+        public Task SetAgentApiKeyHashAsync(string agentId, string keyHash) => Task.CompletedTask;
+        public Task<string?> FindAgentIdByApiKeyHashAsync(string keyHash) => Task.FromResult<string?>(null);
+        public Task UpdateAgentIntegrityAsync(string agentId, string? binarySha256, bool? isSigned, int? policyVersion) => Task.CompletedTask;
+        public Task SaveAgentMetricsAsync(AgentHeartbeat hb) => Task.CompletedTask;
+        public Task<IReadOnlyList<AgentMetricsSample>> ListAgentMetricsAsync(string agentId, int take = 60) =>
+            Task.FromResult<IReadOnlyList<AgentMetricsSample>>(Array.Empty<AgentMetricsSample>());
+        public Task<AgentInventoryItem?> GetAgentAsync(string agentId, int metricsTake = 60) => Task.FromResult<AgentInventoryItem?>(null);
     }
 }
