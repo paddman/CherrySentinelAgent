@@ -1,0 +1,25 @@
+services:
+  sentinel-brain:
+    build:
+      context: ./ai-service
+    container_name: cherry-sentinel-brain
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    environment:
+      CHERRY_ENVIRONMENT: ${CHERRY_ENVIRONMENT:-development}
+      CHERRY_DATABASE_PATH: /data/sentinel-brain.db
+      CHERRY_PLAYBOOK_DIR: /app/playbooks
+      CHERRY_LLM_ENABLED: ${CHERRY_LLM_ENABLED:-true}
+      CHERRY_LLM_BASE_URL: ${CHERRY_LLM_BASE_URL:-http://host.docker.internal:8000/v1}
+      CHERRY_LLM_API_KEY: ${CHERRY_LLM_API_KEY:-local}
+      CHERRY_LLM_MODEL: ${CHERRY_LLM_MODEL:-qwen3.5-9b}
+      CHERRY_LLM_ENABLE_THINKING: ${CHERRY_LLM_ENABLE_THINKING:-false}
+      CHERRY_ANALYSIS_MODE: ${CHERRY_ANALYSIS_MODE:-multi_agent}
+      CHERRY_TENANTS_JSON: ${CHERRY_TENANTS_JSON:-[{"tenant_id":"demo","name":"Cherry Demo","api_key":"change-me","central_verify_tls":false}]}
+      CHERRY_ALLOW_DEV_TENANT: ${CHERRY_ALLOW_DEV_TENANT:-false}
+      CHERRY_CORS_ORIGINS: ${CHERRY_CORS_ORIGINS:-}
+    volumes:
+      - ./data/sentinel-brain:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
