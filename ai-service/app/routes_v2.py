@@ -10,7 +10,11 @@ from .intel_exchange import (
     IntelPublishResponse,
     IntelReputation,
 )
-from .investigation import InvestigationOrchestrator, InvestigationRequest, InvestigationResult
+from .investigation import InvestigationRequest, InvestigationResult
+from .investigation_hardened import (
+    HardenedInvestigationOrchestrator,
+    InvestigationDeadlineExceeded,
+)
 from .security import TenantContext, require_tenant
 
 router = APIRouter(prefix="/v1", tags=["WESSUWAN gap closure"])
@@ -22,9 +26,9 @@ def _intel(request: Request) -> IntelExchangeStore:
     return request.app.state.intel_exchange
 
 
-def _investigator(request: Request) -> InvestigationOrchestrator:
+def _investigator(request: Request) -> HardenedInvestigationOrchestrator:
     if not hasattr(request.app.state, "investigation_orchestrator"):
-        request.app.state.investigation_orchestrator = InvestigationOrchestrator(
+        request.app.state.investigation_orchestrator = HardenedInvestigationOrchestrator(
             brain=request.app.state.brain,
             store=request.app.state.store,
             intel=_intel(request),
@@ -35,12 +39,27 @@ def _investigator(request: Request) -> InvestigationOrchestrator:
     return request.app.state.investigation_orchestrator
 
 
+def _require_intel_publisher(tenant: TenantContext) -> str:
+    metadata = tenant.metadata or {}
+    role = str(metadata.get("role") or "").strip().lower()
+    allowed = bool(metadata.get("can_publish_intel")) or role in {
+        "admin",
+        "operator",
+        "soc",
+        "soc_analyst",
+    }
+    if not allowed:
+        raise HTTPException(status_code=403, detail="intel_publish_requires_operator_role")
+    return str(metadata.get("principal") or metadata.get("operator_id") or role or "operator")[:200]
+
+
 @router.post("/intel/observations", response_model=IntelPublishResponse, status_code=201)
 async def publish_approved_indicator(
     payload: IntelPublishRequest,
     request: Request,
     tenant: TenantContext = Depends(require_tenant),
 ) -> IntelPublishResponse:
+    principal = _require_intel_publisher(tenant)
     result = _intel(request).publish(tenant.tenant_id, payload)
     request.app.state.store.append_audit(
         tenant.tenant_id,
@@ -52,9 +71,10 @@ async def publish_approved_indicator(
             "risk_score": payload.risk_score,
             "confidence": payload.confidence,
             "approved_by": payload.approved_by,
+            "authenticated_principal": principal,
             "shared_fields": result.shared_fields,
         },
-        actor=f"analyst:{payload.approved_by}",
+        actor=f"operator:{principal}",
     )
     return result
 
@@ -92,6 +112,8 @@ async def run_bounded_investigation(
 ) -> InvestigationResult:
     try:
         return await _investigator(request).run(tenant, payload)
+    except InvestigationDeadlineExceeded as exc:
+        raise HTTPException(status_code=504, detail="investigation_deadline_exceeded") from exc
     except Exception as exc:
         request.app.state.store.append_audit(
             tenant.tenant_id,
@@ -112,11 +134,11 @@ async def readiness(
         "implemented": [
             "endpoint and network evidence normalization",
             "local Qwen evidence-grounded analysis",
-            "bounded read-only investigation tool orchestration",
+            "bounded read-only investigation with a hard wall-clock deadline",
             "per-asset behavioral anomaly baseline",
             "human-approved response recommendations",
             "threat graph",
-            "privacy-preserving approved IOC exchange",
+            "operator-approved privacy-preserving IOC exchange",
             "deception tripwires",
             "audit, feedback and usage metering",
         ],
@@ -124,7 +146,8 @@ async def readiness(
             "production PostgreSQL tenant isolation and row-level security",
             "web dashboard integration with the separate Suricata/Zeek application",
             "scheduled hunting and scheduled report delivery",
-            "customer-specific retention, quota and capacity tests",
+            "distributed rate limiting, abuse monitoring and tenant quota enforcement",
+            "customer-specific retention and capacity tests",
             "Windows Server 2012/2012 R2 compatibility on golden images",
         ],
         "safety_boundary": (

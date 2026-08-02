@@ -28,8 +28,13 @@ jobs:
       - name: Install
         run: python -m pip install -e "./ai-service[dev]"
       - name: Compile
-        run: python -m compileall -q ai-service/app ai-service/tests
+        run: python -m compileall -q ai-service/app ai-service/tests ai-service/scripts
       - name: Test
         run: pytest ai-service/tests
+      - name: Controlled acceptance suite
+        run: >-
+          python ai-service/scripts/evaluate_acceptance.py
+          --suite ai-service/evaluation/acceptance-suite.json
+          --out ai-service/acceptance-report.json
       - name: Lint
-        run: ruff check ai-service/app ai-service/tests
+        run: ruff check ai-service/app ai-service/tests ai-service/scripts
