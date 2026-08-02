@@ -58,11 +58,14 @@ async def test_hardened_investigation_enforces_wall_clock_deadline(monkeypatch):
     orchestrator = HardenedInvestigationOrchestrator.__new__(HardenedInvestigationOrchestrator)
     orchestrator._store = FakeAuditStore()
 
+    # Public API validation keeps the minimum at two seconds. model_copy is used
+    # only to make this unit test complete in milliseconds.
     request = InvestigationRequest(
         incident=IncidentInput(incident_id="deadline-1", title="Slow connector"),
-        max_runtime_seconds=0.05,
+        max_runtime_seconds=2,
         max_steps=1,
-    )
+    ).model_copy(update={"max_runtime_seconds": 0.05})
+
     with pytest.raises(InvestigationDeadlineExceeded):
         await orchestrator.run(tenant(), request)
     assert orchestrator._store.rows
