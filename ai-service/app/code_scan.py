@@ -169,14 +169,13 @@ Severity values: info, low, medium, high, critical. Derived findings must cite s
                 update={"warnings": [*fallback.warnings, "LLM ตอบไม่ตรง schema จึงใช้ผลกฎพื้นฐาน"]}
             )
 
-        known = {item.finding_id for item in request.findings}
         selected_ids = {item.finding_id for item in selected}
         merged = {item.finding_id: item for item in fallback.assessments}
         seen: set[str] = set()
         for item in output.assessments:
             if item.finding_id not in selected_ids or item.finding_id in seen:
                 continue
-            refs = [ref for ref in item.evidence_refs if ref in known]
+            refs = [ref for ref in item.evidence_refs if ref in selected_ids]
             if item.finding_id not in refs:
                 refs.insert(0, item.finding_id)
             merged[item.finding_id] = CodeFindingAssessment(
