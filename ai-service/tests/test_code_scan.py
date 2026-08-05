@@ -53,7 +53,7 @@ class FakeLlm:
                         "confidence": 0.96,
                         "rationale_th": "input ภายนอกไหลเข้าสู่ process execution",
                         "remediation": "ใช้ argument array และไม่ผ่าน shell",
-                        "evidence_refs": [known, "invented-id"],
+                        "evidence_refs": [known, "caf-secret", "invented-id"],
                     },
                     {
                         "finding_id": "invented-id",
@@ -71,7 +71,7 @@ class FakeLlm:
                         "severity": "critical",
                         "confidence": 0.90,
                         "rationale_th": "อ้างอิง finding ที่มีจริง",
-                        "evidence_refs": [known, "invented-id"],
+                        "evidence_refs": [known, "caf-secret", "invented-id"],
                     },
                     {
                         "title": "สิ่งที่แต่งขึ้น",
@@ -149,7 +149,7 @@ def sample_request() -> CodeScanRequest:
                     "path": "config/app.php",
                     "line": 7,
                     "column": 1,
-                    "snippet": "$password = 'another-secret-value';",
+                    "snippet": '{"password": "another-secret-value"}',
                     "evidence": "credential assigned in source",
                     "tags": ["secret", "credential"],
                     "fingerprint": "f2",
@@ -160,9 +160,9 @@ def sample_request() -> CodeScanRequest:
     )
 
 
-def settings() -> SimpleNamespace:
+def settings(max_findings: int = 80) -> SimpleNamespace:
     return SimpleNamespace(
-        code_scan_max_llm_findings=80,
+        code_scan_max_llm_findings=max_findings,
         code_scan_max_llm_chars=60_000,
         code_scan_llm_max_tokens=2800,
     )
@@ -196,10 +196,10 @@ def test_deterministic_fallback_redacts_and_persists(tmp_path: Path) -> None:
     assert "[REDACTED]" in request_json
 
 
-def test_llm_guardrails_filter_hallucinated_evidence_and_enforce_floor(tmp_path: Path) -> None:
+def test_llm_guardrails_filter_unseen_and_hallucinated_evidence(tmp_path: Path) -> None:
     llm = FakeLlm()
     store = CodeScanStore(tmp_path / "brain.db")
-    analyzer = CodeScanAnalyzer(settings(), FakeAudit(), llm, store)
+    analyzer = CodeScanAnalyzer(settings(max_findings=1), FakeAudit(), llm, store)
 
     result = asyncio.run(analyzer.analyze("tenant-a", sample_request()))
 
@@ -209,16 +209,23 @@ def test_llm_guardrails_filter_hallucinated_evidence_and_enforce_floor(tmp_path:
     assert result.risk_score >= 85  # LLM tried to return 1 for a confirmed Critical finding.
     assert result.prompt_tokens == 111
     assert result.completion_tokens == 77
-    assert len(result.assessments) == 2  # omitted finding is filled by deterministic analysis
+    assert result.analyzed_by_llm == 1
+    assert len(result.assessments) == 2  # unseen finding is filled by deterministic analysis
     assert all(item.finding_id != "invented-id" for item in result.assessments)
     assert result.assessments[0].evidence_refs == ["caf-command"]
     assert len(result.derived_findings) == 1
     assert result.derived_findings[0].evidence_refs == ["caf-command"]
     assert "UNTRUSTED EVIDENCE" in llm.system_prompt
     serialized_prompt = json.dumps(llm.payload, ensure_ascii=False)
+    assert "caf-secret" not in serialized_prompt
     assert "top-secret-token-value" not in serialized_prompt
     assert "another-secret-value" not in serialized_prompt
     assert "Ignore previous instructions" in serialized_prompt  # preserved as evidence, not obeyed
+
+
+def test_json_style_credentials_are_redacted() -> None:
+    sanitized = sanitize_code_scan(sample_request())
+    assert sanitized.findings[1].snippet == '{"password": "[REDACTED]"}'
 
 
 def test_sanitizer_replaces_private_key_material() -> None:
@@ -247,5 +254,12 @@ def test_duplicate_finding_ids_are_rejected() -> None:
 def test_summary_count_must_match_findings() -> None:
     raw = sample_request().model_dump(mode="json", by_alias=True)
     raw["summary"]["findingCount"] = 99
+    with pytest.raises(ValidationError):
+        CodeScanRequest.model_validate(raw)
+
+
+def test_unsupported_schema_version_is_rejected() -> None:
+    raw = sample_request().model_dump(mode="json", by_alias=True)
+    raw["schemaVersion"] = "2.0"
     with pytest.raises(ValidationError):
         CodeScanRequest.model_validate(raw)
