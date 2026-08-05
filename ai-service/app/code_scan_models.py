@@ -133,7 +133,7 @@ class CodeScanFinding(CodeApiModel):
 
 
 class CodeScanRequest(CodeApiModel):
-    schema_version: str = Field(default="1.0", max_length=20)
+    schema_version: Literal["1.0"] = "1.0"
     scan_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9._:-]+$")
     scanner: CodeScannerIdentity
     started_at_utc: datetime
