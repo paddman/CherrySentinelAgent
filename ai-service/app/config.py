@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,6 +46,10 @@ class Settings(BaseSettings):
     max_evidence_items: int = 250
     max_evidence_chars: int = 80_000
     max_payload_bytes: int = 3_000_000
+
+    code_scan_max_llm_findings: int = Field(default=80, ge=1, le=500)
+    code_scan_max_llm_chars: int = Field(default=60_000, ge=5_000, le=500_000)
+    code_scan_llm_max_tokens: int = Field(default=2800, ge=256, le=16_384)
 
     anomaly_min_samples: int = 20
     anomaly_max_samples: int = 500
