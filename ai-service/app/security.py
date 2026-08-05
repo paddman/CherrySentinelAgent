@@ -102,10 +102,64 @@ class TenantRegistry:
         )
 
 
+def _clean_header(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def resolve_tenant_credentials(
+    cherry_tenant: str | None,
+    cherry_api_key: str | None,
+    nt_shield_tenant: str | None,
+    nt_shield_api_key: str | None,
+) -> tuple[str, str]:
+    """Resolve legacy Cherry headers and the NT Shield branded aliases safely.
+
+    Supplying both header families is allowed only when their values agree. This
+    prevents a reverse proxy, SDK or browser from accidentally authenticating one
+    tenant while displaying another tenant in logs or user interfaces.
+    """
+
+    cherry_tenant = _clean_header(cherry_tenant)
+    cherry_api_key = _clean_header(cherry_api_key)
+    nt_shield_tenant = _clean_header(nt_shield_tenant)
+    nt_shield_api_key = _clean_header(nt_shield_api_key)
+
+    if cherry_tenant and nt_shield_tenant and not hmac.compare_digest(
+        cherry_tenant, nt_shield_tenant
+    ):
+        raise HTTPException(status_code=400, detail="conflicting_tenant_headers")
+
+    if cherry_api_key and nt_shield_api_key and not hmac.compare_digest(
+        cherry_api_key, nt_shield_api_key
+    ):
+        raise HTTPException(status_code=400, detail="conflicting_api_key_headers")
+
+    tenant_id = nt_shield_tenant or cherry_tenant
+    api_key = nt_shield_api_key or cherry_api_key
+    if not tenant_id or not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="tenant_credentials_required",
+        )
+
+    return tenant_id, api_key
+
+
 async def require_tenant(
     request: Request,
-    x_cherry_tenant: str = Header(..., alias="X-Cherry-Tenant"),
-    x_cherry_api_key: str = Header(..., alias="X-Cherry-Api-Key"),
+    x_cherry_tenant: str | None = Header(default=None, alias="X-Cherry-Tenant"),
+    x_cherry_api_key: str | None = Header(default=None, alias="X-Cherry-Api-Key"),
+    x_nt_shield_tenant: str | None = Header(default=None, alias="X-NT-Shield-Tenant"),
+    x_nt_shield_api_key: str | None = Header(default=None, alias="X-NT-Shield-Api-Key"),
 ) -> TenantContext:
     registry: TenantRegistry = request.app.state.tenant_registry
-    return registry.authenticate(x_cherry_tenant, x_cherry_api_key)
+    tenant_id, api_key = resolve_tenant_credentials(
+        x_cherry_tenant,
+        x_cherry_api_key,
+        x_nt_shield_tenant,
+        x_nt_shield_api_key,
+    )
+    return registry.authenticate(tenant_id, api_key)

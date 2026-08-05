@@ -1,0 +1,7 @@
+services:
+  sentinel-brain:
+    container_name: nt-shield-brain
+    environment:
+      CHERRY_PRODUCT_PROFILE: ${CHERRY_PRODUCT_PROFILE:-nt_shield}
+      CHERRY_APP_NAME: ${CHERRY_APP_NAME:-NT Shield AI Incident Commander}
+      CHERRY_DATABASE_PATH: ${CHERRY_DATABASE_PATH:-/data/nt-shield-brain.db}
