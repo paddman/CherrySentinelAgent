@@ -9,10 +9,15 @@ from typing import Any
 
 from .code_scan_models import CodeScanAnalysis, CodeScanListItem, CodeScanRequest
 
+_CREDENTIAL_KEY = (
+    r"(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"refresh[_-]?token|client[_-]?secret|private[_-]?token|db[_-]?password|"
+    r"database[_-]?password|connection[_-]?string)"
+)
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(
-            r"((?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)"
+            rf"((?<![A-Za-z0-9_])[\"']?{_CREDENTIAL_KEY}[\"']?"
             r"\s*[:=]\s*[\"'])[^\"']+([\"'])",
             re.IGNORECASE,
         ),
@@ -20,7 +25,7 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (
         re.compile(
-            r"((?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)"
+            rf"((?<![A-Za-z0-9_])[\"']?{_CREDENTIAL_KEY}[\"']?"
             r"\s*[:=]\s*)[A-Za-z0-9_./+~=-]{8,}",
             re.IGNORECASE,
         ),
