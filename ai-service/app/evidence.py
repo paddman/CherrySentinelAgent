@@ -5,7 +5,7 @@ import ipaddress
 import json
 import re
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .models import EvidenceItem, EvidenceSource, IncidentInput
@@ -38,13 +38,22 @@ def _stable_ref(prefix: str, payload: Any, index: int) -> str:
 
 
 def _timestamp(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    if not value:
+    if value is None or value == "" or isinstance(value, bool):
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, (int, float)) or re.fullmatch(r"-?\d+(?:\.\d+)?", str(value)):
+            # Zeek timestamps are Unix seconds, often with fractional precision.
+            parsed = datetime.fromtimestamp(float(value), tz=timezone.utc)
+        else:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        # Existing timestampUtc inputs without an offset are interpreted as UTC,
+        # never in the API server's local timezone.
+        if parsed.utcoffset() is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
         return None
 
 
@@ -53,6 +62,14 @@ def _first(data: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         if key.lower() in lowered:
             return lowered[key.lower()]
+    return None
+
+
+def _raw_timestamp(data: dict[str, Any]) -> datetime | None:
+    for key in ("timestamp", "timestampUtc", "timestamp_utc"):
+        parsed = _timestamp(_first(data, key))
+        if parsed is not None:
+            return parsed
     return None
 
 
@@ -119,7 +136,7 @@ class EvidenceNormalizer:
                 ref_id=f"incident:{incident.incident_id}",
                 source=EvidenceSource.INCIDENT,
                 kind="incident_summary",
-                timestamp_utc=incident.last_seen or incident.first_seen,
+                timestamp_utc=_timestamp(incident.last_seen or incident.first_seen),
                 summary=safe_text(
                     incident.description
                     or f"{incident.title}: {incident.source_ip or incident.source_host or '?'} -> "
@@ -246,7 +263,7 @@ class EvidenceNormalizer:
                     ref_id=safe_text(ref, 160),
                     source=EvidenceSource.RAW,
                     kind=safe_text(raw.get("kind", "raw"), 80),
-                    timestamp_utc=_timestamp(raw.get("timestamp") or raw.get("timestampUtc")),
+                    timestamp_utc=_raw_timestamp(raw),
                     summary=safe_text(raw.get("summary") or raw),
                     attributes={str(k): v for k, v in raw.items()},
                 )

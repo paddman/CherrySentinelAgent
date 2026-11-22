@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 
 from .config import get_settings
 from .intel_exchange import (
@@ -10,11 +10,12 @@ from .intel_exchange import (
     IntelPublishResponse,
     IntelReputation,
 )
-from .investigation import InvestigationRequest, InvestigationResult
+from .investigation import InvestigationRequest
 from .investigation_hardened import (
     HardenedInvestigationOrchestrator,
     InvestigationDeadlineExceeded,
 )
+from .investigation_models import InvestigationPage, InvestigationResult
 from .security import TenantContext, require_tenant
 
 router = APIRouter(prefix="/v1", tags=["WESSUWAN gap closure"])
@@ -120,9 +121,54 @@ async def run_bounded_investigation(
             "ai.investigation.run",
             payload.incident.incident_id,
             "fail",
-            {"error": str(exc)[:500]},
+            {"error": type(exc).__name__},
         )
         raise HTTPException(status_code=500, detail="investigation_failed") from exc
+
+
+@router.get("/investigations", response_model=InvestigationPage)
+def list_investigation_history(
+    request: Request,
+    response: Response,
+    incident_id: str | None = Query(default=None, min_length=1, max_length=200),
+    limit: int = Query(default=50, ge=1, le=100),
+    before: str | None = Query(default=None, min_length=1, max_length=80),
+    tenant: TenantContext = Depends(require_tenant),
+) -> InvestigationPage:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return request.app.state.store.list_investigations(
+            tenant.tenant_id,
+            incident_id=incident_id,
+            limit=limit,
+            before=before,
+        )
+    except ValueError as exc:
+        if str(exc) != "investigation_cursor_not_found":
+            raise
+        raise HTTPException(
+            status_code=404,
+            detail="investigation_cursor_not_found",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get("/investigations/{investigation_id}", response_model=InvestigationResult)
+def get_investigation_history(
+    request: Request,
+    response: Response,
+    investigation_id: str = Path(min_length=1, max_length=80),
+    tenant: TenantContext = Depends(require_tenant),
+) -> InvestigationResult:
+    response.headers["Cache-Control"] = "no-store"
+    result = request.app.state.store.get_investigation(tenant.tenant_id, investigation_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="investigation_not_found",
+            headers={"Cache-Control": "no-store"},
+        )
+    return result
 
 
 @router.get("/readiness")
@@ -135,6 +181,7 @@ async def readiness(
             "endpoint and network evidence normalization",
             "local Qwen evidence-grounded analysis",
             "bounded read-only investigation with a hard wall-clock deadline",
+            "durable tenant-scoped investigation history with evidence-linked timelines",
             "per-asset behavioral anomaly baseline",
             "human-approved response recommendations",
             "threat graph",

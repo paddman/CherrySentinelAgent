@@ -77,6 +77,13 @@ class SentinelBrain:
         self._specialist_semaphore = asyncio.Semaphore(max(1, settings.specialist_parallelism))
 
     async def analyze(self, tenant_id: str, incident: IncidentInput) -> AnalystDecision:
+        decision, _ = await self.analyze_with_evidence(tenant_id, incident)
+        return decision
+
+    async def analyze_with_evidence(
+        self, tenant_id: str, incident: IncidentInput
+    ) -> tuple[AnalystDecision, list[EvidenceItem]]:
+        """Return the decision and the exact bounded evidence used to build it."""
         started = time.perf_counter()
         evidence = self._normalizer.normalize(incident)
         anomaly = self._score_anomaly(tenant_id, incident)
@@ -155,7 +162,7 @@ class SentinelBrain:
                 "evidence_count": len(evidence),
             },
         )
-        return decision
+        return decision, evidence
 
     def _score_anomaly(self, tenant_id: str, incident: IncidentInput) -> AnomalyResult | None:
         if not incident.features:
