@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .investigation_models import InvestigationPage, InvestigationResult, InvestigationSummary
 from .models import AnalystDecision, FeedbackRequest, UsageSummary
 
 
@@ -64,6 +65,20 @@ class AuditStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_audit_tenant_time
                     ON audit_log(tenant_id, timestamp_utc DESC);
+
+                CREATE TABLE IF NOT EXISTS investigations (
+                    tenant_id TEXT NOT NULL,
+                    investigation_id TEXT NOT NULL,
+                    incident_id TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL,
+                    summary_json TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    PRIMARY KEY (tenant_id, investigation_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_investigations_tenant_time
+                    ON investigations(tenant_id, created_at_utc DESC, investigation_id DESC);
+                CREATE INDEX IF NOT EXISTS idx_investigations_tenant_incident_time
+                    ON investigations(tenant_id, incident_id, created_at_utc DESC, investigation_id DESC);
 
                 CREATE TABLE IF NOT EXISTS feedback (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -218,6 +233,137 @@ class AuditStore:
                 (tenant_id, safe_limit),
             ).fetchall()
         return [AnalystDecision.model_validate_json(row["analysis_json"]) for row in rows]
+
+    def save_investigation(self, tenant_id: str, result: InvestigationResult) -> None:
+        """Insert an immutable result and its success audit in one transaction."""
+        snapshot = InvestigationResult.model_validate(result.model_dump(mode="json"))
+        if snapshot.tenant_id != tenant_id or snapshot.decision.tenant_id != tenant_id:
+            raise ValueError("investigation_tenant_mismatch")
+        if snapshot.decision.incident_id != snapshot.incident_id:
+            raise ValueError("investigation_incident_mismatch")
+        if snapshot.created_at_utc.utcoffset() is None:
+            raise ValueError("investigation_timestamp_requires_timezone")
+
+        # A fixed-width UTC key preserves chronological ordering across offsets
+        # and fractional-second representations without changing the snapshot.
+        created_at = snapshot.created_at_utc.astimezone(timezone.utc).isoformat(timespec="microseconds")
+        summary = InvestigationSummary(
+            investigation_id=snapshot.investigation_id,
+            incident_id=snapshot.incident_id,
+            analysis_id=snapshot.decision.analysis_id,
+            created_at_utc=snapshot.created_at_utc,
+            classification=snapshot.decision.classification,
+            risk_score=snapshot.decision.risk_score,
+            confidence=snapshot.decision.confidence,
+            model=snapshot.decision.model,
+            deterministic_fallback=snapshot.decision.deterministic_fallback,
+            stopped_reason=snapshot.stopped_reason,
+            tool_call_count=len(snapshot.trace),
+            evidence_count=len(snapshot.evidence_catalog),
+        )
+        detail = {
+            "investigation_id": snapshot.investigation_id,
+            "plan_source": snapshot.plan.source,
+            "tools": [item.tool for item in snapshot.plan.tools],
+            "tool_calls": len(snapshot.trace),
+            "stopped_reason": snapshot.stopped_reason,
+            "related_incident_count": snapshot.related_incident_count,
+            "prior_analysis_count": snapshot.prior_analysis_count,
+            "indicator_count": len(snapshot.indicators),
+        }
+        with self._lock, self._connect() as conn:
+            # Deliberately use INSERT: a duplicate ID must never replace a
+            # completed investigation or append a second success audit.
+            conn.execute(
+                """
+                INSERT INTO investigations
+                    (tenant_id, investigation_id, incident_id, created_at_utc, summary_json, result_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    tenant_id,
+                    snapshot.investigation_id,
+                    snapshot.incident_id,
+                    created_at,
+                    summary.model_dump_json(by_alias=True),
+                    snapshot.model_dump_json(by_alias=True),
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO audit_log
+                    (tenant_id, timestamp_utc, actor, action, target, outcome, detail_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    tenant_id,
+                    datetime.now(timezone.utc).isoformat(),
+                    "api",
+                    "ai.investigation.run",
+                    snapshot.incident_id,
+                    "success",
+                    self._json(detail),
+                ),
+            )
+
+    def get_investigation(self, tenant_id: str, investigation_id: str) -> InvestigationResult | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT result_json FROM investigations WHERE tenant_id=? AND investigation_id=?",
+                (tenant_id, investigation_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return InvestigationResult.model_validate_json(row["result_json"])
+
+    def list_investigations(
+        self,
+        tenant_id: str,
+        *,
+        incident_id: str | None = None,
+        limit: int = 50,
+        before: str | None = None,
+    ) -> InvestigationPage:
+        if not 1 <= limit <= 100:
+            raise ValueError("investigation_limit_out_of_range")
+        if incident_id is not None and not 1 <= len(incident_id) <= 200:
+            raise ValueError("investigation_incident_id_invalid")
+        if before is not None and not 1 <= len(before) <= 80:
+            raise ValueError("investigation_cursor_invalid")
+
+        conditions = ["tenant_id=?"]
+        params: list[Any] = [tenant_id]
+        if incident_id is not None:
+            conditions.append("incident_id=?")
+            params.append(incident_id)
+
+        with self._lock, self._connect() as conn:
+            if before is not None:
+                cursor_row = conn.execute(
+                    "SELECT created_at_utc, investigation_id FROM investigations WHERE "
+                    + " AND ".join(conditions)
+                    + " AND investigation_id=?",
+                    (*params, before),
+                ).fetchone()
+                if cursor_row is None:
+                    # Missing, foreign-tenant and mismatched-filter cursors are
+                    # intentionally indistinguishable to the caller.
+                    raise ValueError("investigation_cursor_not_found")
+                conditions.append("(created_at_utc, investigation_id) < (?, ?)")
+                params.extend((cursor_row["created_at_utc"], cursor_row["investigation_id"]))
+
+            rows = conn.execute(
+                "SELECT summary_json FROM investigations WHERE "
+                + " AND ".join(conditions)
+                + " ORDER BY created_at_utc DESC, investigation_id DESC LIMIT ?",
+                (*params, limit + 1),
+            ).fetchall()
+
+        items = [InvestigationSummary.model_validate_json(row["summary_json"]) for row in rows[:limit]]
+        return InvestigationPage(
+            items=items,
+            next_cursor=items[-1].investigation_id if len(rows) > limit else None,
+        )
 
     def save_feedback(self, tenant_id: str, feedback: FeedbackRequest) -> None:
         with self._lock, self._connect() as conn:

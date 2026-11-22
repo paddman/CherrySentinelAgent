@@ -13,6 +13,7 @@ Sentinel Brain turns many low-level alerts into one explainable incident decisio
 - **Evidence guardrails**: the model may cite only supplied `ref_id` values. Unknown citations are discarded.
 - **Response guardrails**: only allowlisted actions are returned. Blocking, isolation, account, process and service actions always require human approval.
 - **Bounded Investigation Agent** with a hard wall-clock deadline and four read-only tools: approved IOC aggregate, same-tenant analysis history, related Cherry Central incidents and local playbook search.
+- **[Durable investigation history](../docs/investigation-history.md)** with tenant-scoped snapshots, paginated summaries, the evidence used for each decision and a timestamped evidence timeline.
 - **Threat graph** linking hosts, IPs, users, processes, services, domains, IDS alerts, ASM findings, CVEs and deception hits.
 - **Silent Hunter deception tokens** for canary credentials, honey files, decoy API keys, URLs and shares; a hit becomes a critical AI-analyzed incident.
 - **Approved IOC Exchange** for public IP, public domain and SHA-256 aggregates without returning tenant identities.
@@ -126,7 +127,33 @@ curl -X POST http://127.0.0.1:8088/v1/investigations/run \
   }'
 ```
 
-The planner cannot add arbitrary tools. Every call records its reason, duration, result and evidence references. The whole request is wrapped in a hard deadline; a connector or model that exceeds it receives HTTP `504` rather than silently running forever, a charming habit shared by less disciplined agents.
+The planner cannot add arbitrary tools. Every call records its reason, duration, result and evidence references. The whole request is wrapped in a hard deadline; a connector or model that exceeds it receives HTTP `504`.
+
+Completed runs are saved before a successful response is returned. Each run has its own `investigationId`, so investigating the same incident again preserves earlier decisions and traces. The response also includes `evidenceCatalog`, a chronological `timeline` and `untimedEvidenceRefs`. Tool references excluded by evidence limits appear in `omittedEvidenceRefs`.
+
+## Read investigation history
+
+List the latest completed runs for one incident:
+
+```bash
+curl -G http://127.0.0.1:8088/v1/investigations \
+  -H 'X-Cherry-Tenant: demo' \
+  -H 'X-Cherry-Api-Key: change-me' \
+  --data-urlencode 'incident_id=inc-1001' \
+  --data-urlencode 'limit=20'
+```
+
+The response contains `items` with summary rows and `nextCursor`. To continue, pass a non-null `nextCursor` as the `before` query parameter, keeping the same incident filter. Omit `incident_id` to list all completed runs belonging to the authenticated tenant. The default page size is 50; the maximum is 100.
+
+Retrieve the full saved result using an `investigationId` returned by the run or list endpoint:
+
+```bash
+curl http://127.0.0.1:8088/v1/investigations/INVESTIGATION_ID \
+  -H 'X-Cherry-Tenant: demo' \
+  -H 'X-Cherry-Api-Key: change-me'
+```
+
+History reads use saved snapshots without invoking the LLM or Cherry Central. Missing IDs and IDs belonging to another tenant return `404`. Failed and timed-out runs remain audit-only. See the [operator guide](../docs/investigation-history.md) for evidence interpretation, migration, backup and current limits.
 
 ## Approved IOC exchange
 

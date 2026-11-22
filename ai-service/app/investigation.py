@@ -6,16 +6,30 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Literal, Protocol
-
-from pydantic import Field
+from typing import Any, Protocol
 
 from .audit import AuditStore
 from .evidence import safe_text
 from .intel_exchange import IndicatorType, IntelExchangeStore, IntelReputation, canonicalize_indicator
-from .models import AnalystDecision, ApiModel, IncidentInput
+from .investigation_models import (
+    InvestigationPlan,
+    InvestigationRequest,
+    InvestigationResult,
+    InvestigationTimelineEntry,
+    PlannedTool,
+    ToolCallTrace,
+    ToolName,
+)
+from .models import AnalystDecision, EvidenceItem, IncidentInput
 from .playbooks import PlaybookRetriever
 from .security import TenantContext
+
+# Keep existing imports from app.investigation compatible after separating the
+# contracts from the store/orchestrator implementation.
+__all__ = [
+    "InvestigationOrchestrator", "InvestigationPlan", "InvestigationRequest",
+    "InvestigationResult", "PlannedTool", "ToolCallTrace", "ToolName",
+]
 
 
 class CentralReader(Protocol):
@@ -23,7 +37,9 @@ class CentralReader(Protocol):
 
 
 class BrainReader(Protocol):
-    async def analyze(self, tenant_id: str, incident: IncidentInput) -> AnalystDecision: ...
+    async def analyze_with_evidence(
+        self, tenant_id: str, incident: IncidentInput
+    ) -> tuple[AnalystDecision, list[EvidenceItem]]: ...
 
 
 class JsonPlanner(Protocol):
@@ -39,62 +55,12 @@ class JsonPlanner(Protocol):
     ) -> Any: ...
 
 
-ToolName = Literal["ioc_lookup", "analysis_history", "central_related", "playbook_search"]
 _ALLOWED_TOOLS: tuple[ToolName, ...] = (
     "ioc_lookup",
     "analysis_history",
     "central_related",
     "playbook_search",
 )
-
-
-class InvestigationRequest(ApiModel):
-    incident: IncidentInput
-    include_central_related: bool = True
-    max_steps: int = Field(default=4, ge=1, le=6)
-    max_runtime_seconds: float = Field(default=20.0, ge=2.0, le=120.0)
-    central_take: int = Field(default=200, ge=1, le=500)
-    analysis_history_limit: int = Field(default=100, ge=1, le=500)
-    max_related_results: int = Field(default=10, ge=1, le=30)
-
-
-class PlannedTool(ApiModel):
-    tool: ToolName
-    reason: str = Field(default="", max_length=500)
-
-
-class InvestigationPlan(ApiModel):
-    source: Literal["llm", "deterministic"]
-    tools: list[PlannedTool] = Field(default_factory=list)
-
-
-class ToolCallTrace(ApiModel):
-    step: int
-    tool: str
-    status: Literal["success", "skipped", "failed", "timeout"]
-    reason: str = ""
-    started_at_utc: datetime
-    duration_ms: int = 0
-    input_summary: str = ""
-    output_summary: str = ""
-    evidence_refs: list[str] = Field(default_factory=list)
-
-
-class InvestigationResult(ApiModel):
-    investigation_id: str
-    tenant_id: str
-    incident_id: str
-    created_at_utc: datetime
-    bounded: bool = True
-    read_only: bool = True
-    plan: InvestigationPlan
-    trace: list[ToolCallTrace]
-    indicators: list[dict[str, str]] = Field(default_factory=list)
-    intel_reputation: list[IntelReputation] = Field(default_factory=list)
-    related_incident_count: int = 0
-    prior_analysis_count: int = 0
-    stopped_reason: str
-    decision: AnalystDecision
 
 
 @dataclass(slots=True)
@@ -197,6 +163,9 @@ class InvestigationOrchestrator:
                 else:  # pragma: no cover - protected by validated Literal and plan sanitizer
                     output = _ToolOutput([], [], "Tool is not in the read-only allowlist.")
 
+                # Request evidence is untrusted. Give tool results a per-run
+                # namespace so a client-supplied ref cannot shadow their origin.
+                self._namespace_tool_evidence(output, investigation_id, index)
                 incident.raw_evidence.extend(output.evidence)
                 trace.append(
                     ToolCallTrace(
@@ -211,7 +180,7 @@ class InvestigationOrchestrator:
                         evidence_refs=output.refs[:30],
                     )
                 )
-            except Exception as exc:
+            except Exception:
                 trace.append(
                     ToolCallTrace(
                         step=index,
@@ -221,13 +190,13 @@ class InvestigationOrchestrator:
                         started_at_utc=call_started_utc,
                         duration_ms=int((time.monotonic() - call_started) * 1000),
                         input_summary=self._tool_input_summary(planned.tool, incident, indicators),
-                        output_summary=f"Read-only tool failed: {safe_text(exc, 350)}",
+                        output_summary="Read-only tool failed; no evidence was collected from this tool.",
                     )
                 )
 
         analysis_started = datetime.now(timezone.utc)
         analysis_clock = time.monotonic()
-        decision = await self._brain.analyze(tenant.tenant_id, incident)
+        decision, evidence = await self._brain.analyze_with_evidence(tenant.tenant_id, incident)
         trace.append(
             ToolCallTrace(
                 step=len(trace) + 1,
@@ -245,23 +214,18 @@ class InvestigationOrchestrator:
             )
         )
 
-        self._store.append_audit(
-            tenant.tenant_id,
-            "ai.investigation.run",
-            incident.incident_id,
-            "success",
-            {
-                "investigation_id": investigation_id,
-                "plan_source": plan.source,
-                "tools": [item.tool for item in plan.tools],
-                "tool_calls": len(trace),
-                "stopped_reason": stopped_reason,
-                "related_incident_count": related_count,
-                "prior_analysis_count": prior_count,
-                "indicator_count": len(indicators),
-            },
+        known_refs = {item.ref_id for item in evidence}
+        for call in trace:
+            call.omitted_evidence_refs = [ref for ref in call.evidence_refs if ref not in known_refs]
+            call.evidence_refs = [ref for ref in call.evidence_refs if ref in known_refs]
+        timeline = sorted(
+            (
+                InvestigationTimelineEntry(timestamp_utc=item.timestamp_utc, ref_id=item.ref_id)
+                for item in evidence if item.timestamp_utc is not None
+            ),
+            key=lambda entry: (entry.timestamp_utc, entry.ref_id),
         )
-        return InvestigationResult(
+        result = InvestigationResult(
             investigation_id=investigation_id,
             tenant_id=tenant.tenant_id,
             incident_id=incident.incident_id,
@@ -274,7 +238,25 @@ class InvestigationOrchestrator:
             prior_analysis_count=prior_count,
             stopped_reason=stopped_reason,
             decision=decision,
+            evidence_catalog=evidence,
+            timeline=timeline,
+            untimed_evidence_refs=[item.ref_id for item in evidence if item.timestamp_utc is None],
         )
+        # Returning success means both the snapshot and its success audit have
+        # committed. Reanalysis can update the latest decision independently.
+        self._store.save_investigation(tenant.tenant_id, result)
+        return result
+
+    @staticmethod
+    def _namespace_tool_evidence(output: _ToolOutput, investigation_id: str, step: int) -> None:
+        refs: dict[str, str] = {}
+        for index, item in enumerate(output.evidence):
+            original = str(item.get("ref_id") or item.get("refId") or index)
+            ref = f"tool:{investigation_id}:{step}:{index}"
+            refs[original] = ref
+            item["ref_id"] = ref
+            item.pop("refId", None)
+        output.refs = [refs[ref] for ref in output.refs if ref in refs]
 
     async def _plan(
         self,
